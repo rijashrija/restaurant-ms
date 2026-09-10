@@ -1,0 +1,16 @@
+# Python virtual environment — never commit this (it's huge and OS-specific)
+venv/
+env/
+.venv/
+
+# Environment secrets — NEVER commit this
+.env
+
+# Python cache files — auto-generated, not needed in Git
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE files
+.vscode/
+.idea/
