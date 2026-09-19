@@ -80,7 +80,46 @@ USE restaurant_db;
 
 
 -- ──────────────────────────────────────────────────────────────
--- TABLE 1: restaurant_tables
+-- TABLE 1: users
+-- ──────────────────────────────────────────────────────────────
+-- Stores owners, managers, and staff members.
+-- ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS users (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    username        VARCHAR(100) NOT NULL UNIQUE,
+    password_hash   VARCHAR(255) NOT NULL,
+    role            ENUM('owner', 'manager', 'staff') NOT NULL DEFAULT 'staff',
+    permissions     TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- ──────────────────────────────────────────────────────────────
+-- TABLE 2: restaurant_settings
+-- ──────────────────────────────────────────────────────────────
+-- Stores the branding of the restaurant.
+-- ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS restaurant_settings (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    restro_name     VARCHAR(200) NOT NULL,
+    tagline         VARCHAR(255),
+    description     TEXT,
+    logo_url        VARCHAR(500)
+);
+
+-- ──────────────────────────────────────────────────────────────
+-- TABLE 3: menu_categories
+-- ──────────────────────────────────────────────────────────────
+-- Stores categories for menu items.
+-- ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS menu_categories (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL UNIQUE,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- ──────────────────────────────────────────────────────────────
+-- TABLE 4: restaurant_tables
 -- ──────────────────────────────────────────────────────────────
 -- Represents the physical tables in your restaurant.
 -- Each table gets a unique QR code. When a customer scans it,
@@ -267,7 +306,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 -- The QR identifier matches what the URL will contain:
 --   http://localhost:3000/menu?table=table-1
 -- ──────────────────────────────────────────────────────────────
-INSERT INTO restaurant_tables (table_number, qr_identifier, status) VALUES
+INSERT IGNORE INTO restaurant_tables (table_number, qr_identifier, status) VALUES
     (1,  'table-1',  'available'),
     (2,  'table-2',  'available'),
     (3,  'table-3',  'available'),
@@ -286,7 +325,7 @@ INSERT INTO restaurant_tables (table_number, qr_identifier, status) VALUES
 -- Real menu items for a Nepali restaurant context.
 -- Prices are in NPR (Nepali Rupees).
 -- ──────────────────────────────────────────────────────────────
-INSERT INTO menu_items (name, description, price, category, is_available) VALUES
+INSERT IGNORE INTO menu_items (name, description, price, category, is_available) VALUES
     -- Momos
     ('Chicken Momo',     'Juicy steamed chicken dumplings served with tomato chutney', 250.00, 'Momo',        TRUE),
     ('Veg Momo',         'Soft steamed vegetable dumplings with spicy dipping sauce',  200.00, 'Momo',        TRUE),

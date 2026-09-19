@@ -3,20 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ChefHat, ClipboardList, Utensils, LayoutDashboard,
-  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag
+  ChefHat, ClipboardList, Utensils, LayoutDashboard, Home,
+  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
-import { getOrders, getOrderDetails, updateOrderStatus, getAllMenu, updateMenuAvailability, getTables, addTable, deleteTable, addMenuItem, updateMenuItem, exportOrderHistory, getRestaurantSettings, updateRestaurantSettings, RestaurantSettings, uploadLogo, getCategories, Category, addCategory, toggleCategory, updateCategory, transferTable } from "../../services/api";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { getOrders, getOrderDetails, updateOrderStatus, getAllMenu, updateMenuAvailability, getTables, addTable, deleteTable, updateTableStatus, addMenuItem, updateMenuItem, exportOrderHistory, getRestaurantSettings, updateRestaurantSettings, RestaurantSettings, uploadLogo, getCategories, Category, addCategory, toggleCategory, updateCategory, transferTable, getDashboardStats, API_BASE_URL } from "../../services/api";
 import { getToken, getUser, clearToken, createManager, listManagers, updateManager, deleteManager, AuthUser } from "../../services/auth";
 import { Table } from "../../lib/types";
 
-type Tab = "orders" | "menu" | "staff" | "tables" | "settings" | "place_order";
+type Tab = "home" | "orders" | "menu" | "staff" | "tables" | "settings" | "place_order";
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("orders");
+  const [activeTab, setActiveTab] = useState<Tab>("home");
 
   // Orders State
   const [orders, setOrders] = useState<any[]>([]);
@@ -35,13 +35,13 @@ export default function AdminDashboard() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [isAddingMenu, setIsAddingMenu] = useState(false);
   const [editingMenuId, setEditingMenuId] = useState<number | null>(null);
-  
+
   // Categories State
   const [categories, setCategories] = useState<Category[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
-  
+
   // Category UI State
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
@@ -63,15 +63,23 @@ export default function AdminDashboard() {
   const [tableError, setTableError] = useState<string | null>(null);
   const [tableSuccess, setTableSuccess] = useState<string | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
+  const [updatingTableId, setUpdatingTableId] = useState<number | null>(null);
+  // Unpaid warning dialog state
+  const [unpaidWarning, setUnpaidWarning] = useState<{ tableId: number; tableNumber: number } | null>(null);
 
-const ALL_MODULES = [
-  { id: "orders", label: "Recent Orders", desc: "View and update order status, transfer tables" },
-  { id: "menu", label: "Menu & Categories", desc: "Add/edit food items, prices, and categories" },
-  { id: "tables", label: "Table Management", desc: "Manage physical tables and print QR codes" },
-  { id: "staff", label: "Staff Management", desc: "Create and edit staff/manager accounts" },
-  { id: "settings", label: "Restaurant Settings", desc: "Update restaurant profile, tax rate, & branding" },
-  { id: "place_order", label: "Place Order", desc: "Place orders on behalf of customers" },
-];
+  // Home State
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
+  const ALL_MODULES = [
+    { id: "home", label: "Home Dashboard", desc: "Overview and statistics" },
+    { id: "orders", label: "Recent Orders", desc: "View and update order status, transfer tables" },
+    { id: "menu", label: "Menu & Categories", desc: "Add/edit food items, prices, and categories" },
+    { id: "tables", label: "Table Management", desc: "Manage physical tables and print QR codes" },
+    { id: "staff", label: "Staff Management", desc: "Create and edit staff/manager accounts" },
+    { id: "settings", label: "Restaurant Settings", desc: "Update restaurant profile, tax rate, & branding" },
+    { id: "place_order", label: "Place Order", desc: "Place orders on behalf of customers" },
+  ];
 
   // Staff State
   const [managers, setManagers] = useState<any[]>([]);
@@ -84,6 +92,10 @@ const ALL_MODULES = [
   const [staffSuccess, setStaffSuccess] = useState<string | null>(null);
   const [isCreatingManager, setIsCreatingManager] = useState(false);
   const [editingManagerId, setEditingManagerId] = useState<number | null>(null);
+  const [showAddStaffForm, setShowAddStaffForm] = useState(false);
+
+  // Tables State (Moving showAddTableForm here too)
+  const [showAddTableForm, setShowAddTableForm] = useState(false);
 
   // Restaurant Settings State
   const [restroSettings, setRestroSettings] = useState<RestaurantSettings>({ restro_name: "", tagline: "", description: "", logo_url: "" });
@@ -116,7 +128,7 @@ const ALL_MODULES = [
   useEffect(() => {
     if (currentUser) {
       if (!hasPermission(activeTab)) {
-        const permittedTab = ALL_MODULES.find(mod => hasPermission(mod.id))?.id || "orders";
+        const permittedTab = ALL_MODULES.find(mod => hasPermission(mod.id))?.id || "home";
         setActiveTab(permittedTab as Tab);
       }
     }
@@ -126,6 +138,21 @@ const ALL_MODULES = [
     clearToken();
     router.replace("/login");
   };
+
+  // ── Home Dashboard ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "home" && currentUser?.role === "owner") {
+      const token = getToken();
+      if (token) {
+        getDashboardStats(token).then(setDashboardStats).catch(console.error);
+      }
+    }
+  }, [activeTab, currentUser]);
 
   // ── Orders ────────────────────────────────────────────────────────────────
   const loadOrders = async () => {
@@ -145,7 +172,7 @@ const ALL_MODULES = [
     try {
       const token = getToken();
       if (!token) { router.replace("/login"); return; }
-      
+
       const fromId = parseInt(fromTableId);
       const toId = parseInt(toTableId);
       if (!fromId || !toId) throw new Error("Please select both source and destination tables.");
@@ -186,6 +213,13 @@ const ALL_MODULES = [
     }
   }, [activeTab]);
 
+  // ── Tables ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeTab === "tables") {
+      getTables().then(setRestaurantTables).catch(console.error);
+    }
+  }, [activeTab]);
+
   // ── Restaurant Settings & Categories ────────────────────────────────────────────────────
   useEffect(() => {
     getRestaurantSettings()
@@ -221,13 +255,13 @@ const ALL_MODULES = [
     const file = e.target.files[0];
     setSettingsError(null);
     setIsUploadingLogo(true);
-    
+
     try {
       const token = getToken();
       if (!token) { router.replace("/login"); return; }
-      
+
       const logoUrl = await uploadLogo(file, token);
-      
+
       // Update the settings state with the new URL, prefixed with API_BASE_URL
       // if it's a relative path so the preview works
       const previewUrl = logoUrl.startsWith("/") ? `http://localhost:5000${logoUrl}` : logoUrl;
@@ -291,21 +325,21 @@ const ALL_MODULES = [
     try {
       const token = getToken();
       if (!token) { router.replace("/login"); return; }
-      
+
       const oldCat = categories.find(c => c.id === id);
       if (oldCat?.name === editCategoryName) {
         setEditingCategoryId(null);
         return;
       }
-      
+
       const updatedCat = await updateCategory(id, editCategoryName, token);
-      
+
       setCategories(categories.map(c => c.id === id ? updatedCat : c));
-      
-      setMenuItems(menuItems.map(item => 
+
+      setMenuItems(menuItems.map(item =>
         item.category === oldCat?.name ? { ...item, category: updatedCat.name } : item
       ));
-      
+
       if (oldCat && expandedCategories[oldCat.name]) {
         setExpandedCategories(prev => {
           const newExpanded = { ...prev };
@@ -314,7 +348,7 @@ const ALL_MODULES = [
           return newExpanded;
         });
       }
-      
+
       setEditingCategoryId(null);
     } catch (err: any) {
       if (err.message?.includes("Invalid token")) clearToken();
@@ -341,12 +375,12 @@ const ALL_MODULES = [
     const itemIdStr = e.dataTransfer.getData("itemId");
     if (!itemIdStr) return;
     const itemId = parseInt(itemIdStr);
-    
+
     const item = menuItems.find(i => i.id === itemId);
     if (!item || item.category === targetCategoryName) return;
 
     setMenuItems(prev => prev.map(i => i.id === itemId ? { ...i, category: targetCategoryName } : i));
-    
+
     try {
       const token = getToken();
       if (!token) return;
@@ -354,9 +388,7 @@ const ALL_MODULES = [
         name: item.name,
         description: item.description,
         price: item.price,
-        category: targetCategoryName,
-        is_available: item.is_available,
-        image_url: item.image_url
+        category: targetCategoryName
       }, token);
     } catch (err) {
       setMenuItems(prev => prev.map(i => i.id === itemId ? { ...i, category: item.category } : i));
@@ -366,9 +398,8 @@ const ALL_MODULES = [
 
   const hasPermission = (moduleName: string) => {
     if (!currentUser) return false;
-    if (currentUser.role === "owner") return true;
+    if (currentUser.role === "owner" || moduleName === "home") return true;
     const result = currentUser.permissions?.includes(moduleName) ?? false;
-    console.log(`hasPermission check for ${moduleName}:`, { role: currentUser.role, permissions: currentUser.permissions, result });
     return result;
   };
 
@@ -410,120 +441,6 @@ const ALL_MODULES = [
     }
   }, [activeTab]);
 
-  const handleAddTable = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTableError(null);
-    setTableSuccess(null);
-    setIsAddingTable(true);
-    try {
-      const token = getToken();
-      if (!token) {
-        router.replace("/login");
-        return;
-      }
-      
-      const num = parseInt(newTableNumber);
-      if (isNaN(num)) throw new Error("Table number must be an integer");
-      
-      const identifier = `table-${num}`;
-
-      await addTable(num, identifier, token);
-      setTableSuccess(`Table ${num} added successfully!`);
-      setNewTableNumber("");
-      
-      // Refresh list
-      const data = await getTables();
-      setRestaurantTables(data);
-    } catch (err: any) {
-      if (err.message?.includes("Invalid token") || err.message?.includes("expired")) {
-        clearToken();
-        router.replace("/login");
-        return;
-      }
-      setTableError(err.message);
-    } finally {
-      setIsAddingTable(false);
-    }
-  };
-
-  // ── Download single QR as PNG ──────────────────────────────────────────────
-  const handleDownloadQR = (tableNumber: number) => {
-    const svgEl = document.getElementById(`qr-svg-${tableNumber}`)?.querySelector("svg");
-    if (!svgEl) return;
-
-    const svgData = new XMLSerializer().serializeToString(svgEl);
-    const canvas = document.createElement("canvas");
-    const width = 480;
-    const height = 620;
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const qrImg = new Image();
-    qrImg.onload = () => {
-      // White background
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, width, height);
-
-      // Border
-      ctx.strokeStyle = "#e5e7eb";
-      ctx.lineWidth = 2;
-      ctx.roundRect(10, 10, width - 20, height - 20, 16);
-      ctx.stroke();
-
-      // Table number header
-      ctx.fillStyle = "#f3f4f6";
-      ctx.beginPath();
-      ctx.roundRect(width / 2 - 80, 30, 160, 44, 22);
-      ctx.fill();
-      ctx.fillStyle = "#111827";
-      ctx.font = "bold 24px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(`Table ${tableNumber}`, width / 2, 60);
-
-      // QR code centered
-      const qrSize = 320;
-      const qrX = (width - qrSize) / 2;
-      const qrY = 100;
-      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-
-      // "Scan to order food" text
-      ctx.fillStyle = "#ea580c";
-      ctx.font = "bold 22px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("Scan to order food", width / 2, qrY + qrSize + 45);
-
-      // Restaurant name (subtle)
-      ctx.fillStyle = "#9ca3af";
-      ctx.font = "14px sans-serif";
-      ctx.fillText("Restaurant Management System", width / 2, qrY + qrSize + 80);
-
-      const link = document.createElement("a");
-      link.download = `table-${tableNumber}-qr.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    };
-    qrImg.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
-  };
-
-  // ── Delete table ────────────────────────────────────────────────────────────
-  const handleDeleteTable = async (tableId: number, tableNumber: number) => {
-    if (!confirm(`Are you sure you want to delete Table ${tableNumber}? This cannot be undone.`)) return;
-    try {
-      const token = getToken();
-      if (!token) { router.replace("/login"); return; }
-      await deleteTable(tableId, token);
-      setRestaurantTables((prev) => prev.filter((t) => t.id !== tableId));
-    } catch (err: any) {
-      if (err.message?.includes("Invalid token") || err.message?.includes("expired")) {
-        clearToken();
-        router.replace("/login");
-        return;
-      }
-      alert(err.message || "Failed to delete table");
-    }
-  };
 
   // ── Staff Management Handlers ─────────────────────────────────────────────
   const handleEditManager = (manager: any) => {
@@ -598,7 +515,7 @@ const ALL_MODULES = [
     try {
       const token = getToken();
       if (!token) { router.replace("/login"); return; }
-      
+
       // We can use a simple state to show loading on the button if we want, but for CSV it's usually fast enough
       await exportOrderHistory(token);
     } catch (err: any) {
@@ -658,7 +575,7 @@ const ALL_MODULES = [
     try {
       const token = getToken();
       if (!token) { router.replace("/login"); return; }
-      
+
       const priceVal = parseFloat(menuPrice);
       if (isNaN(priceVal) || priceVal < 0) throw new Error("Please enter a valid positive price.");
 
@@ -697,6 +614,88 @@ const ALL_MODULES = [
     }
   };
 
+  // ── Table Handlers ────────────────────────────────────────────────────────
+  const loadTables = async () => {
+    try { setRestaurantTables(await getTables()); } catch { /* silent */ }
+  };
+
+  const handleAddTable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTableError(null);
+    setTableSuccess(null);
+    setIsAddingTable(true);
+    try {
+      const token = getToken();
+      if (!token) { router.replace("/login"); return; }
+      const num = parseInt(newTableNumber);
+      if (isNaN(num) || num < 1) throw new Error("Please enter a valid table number.");
+      const qrId = `table-${num}`;
+      await addTable(num, qrId, token);
+      setTableSuccess(`Table ${num} added successfully!`);
+      setNewTableNumber("");
+      await loadTables();
+      setTimeout(() => setTableSuccess(null), 3000);
+    } catch (err: any) {
+      if (err.message?.includes("Invalid token") || err.message?.includes("expired")) { clearToken(); router.replace("/login"); return; }
+      setTableError(err.message || "Failed to add table.");
+    } finally {
+      setIsAddingTable(false);
+    }
+  };
+
+  const handleDeleteTable = async (tableId: number, tableNumber: number) => {
+    if (!confirm(`Delete Table ${tableNumber}? This will also remove its QR code.`)) return;
+    try {
+      const token = getToken();
+      if (!token) { router.replace("/login"); return; }
+      await deleteTable(tableId, token);
+      setRestaurantTables(prev => prev.filter(t => t.id !== tableId));
+    } catch (err: any) {
+      if (err.message?.includes("Invalid token") || err.message?.includes("expired")) { clearToken(); router.replace("/login"); return; }
+      alert(err.message || "Failed to delete table.");
+    }
+  };
+
+  const handleDownloadQR = (tableNumber: number) => {
+    const svgEl = document.querySelector(`#qr-svg-${tableNumber} svg`) as SVGElement | null;
+    if (!svgEl) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svgEl);
+    const blob = new Blob([svgStr], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `table-${tableNumber}-qr.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleMarkTableStatus = async (tableId: number, tableNumber: number, currentStatus: string) => {
+    // If trying to mark available, check if there are unpaid orders first
+    if (currentStatus === "occupied") {
+      setUnpaidWarning({ tableId, tableNumber });
+      return;
+    }
+    // Mark as occupied directly
+    await doUpdateTableStatus(tableId, "occupied");
+  };
+
+  const doUpdateTableStatus = async (tableId: number, newStatus: "available" | "occupied") => {
+    setUpdatingTableId(tableId);
+    try {
+      const token = getToken();
+      if (!token) { router.replace("/login"); return; }
+      await updateTableStatus(tableId, newStatus, token);
+      setRestaurantTables(prev => prev.map(t => t.id === tableId ? { ...t, status: newStatus } : t));
+    } catch (err: any) {
+      if (err.message?.includes("Invalid token") || err.message?.includes("expired")) { clearToken(); router.replace("/login"); return; }
+      alert(err.message || "Failed to update table status.");
+    } finally {
+      setUpdatingTableId(null);
+      setUnpaidWarning(null);
+    }
+  };
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -720,104 +719,174 @@ const ALL_MODULES = [
   return (
     <div className="h-screen flex flex-col md:flex-row overflow-hidden" style={{ background: "#f5efe6" }}>
 
-          {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <div
+        className="w-full md:w-64 text-white flex flex-col print:hidden overflow-y-auto z-20"
+        style={{ background: "linear-gradient(180deg, #2c2118 0%, #1f170f 100%)", borderRight: "1px solid #3d2e22", boxShadow: "4px 0 20px rgba(0,0,0,0.2)" }}
+      >
+        <div className="p-6" style={{ borderBottom: "1px solid #3d2e22" }}>
           <div
-            className="w-full md:w-64 text-white flex flex-col print:hidden overflow-y-auto z-20"
-            style={{ background: "linear-gradient(180deg, #2c2118 0%, #1f170f 100%)", borderRight: "1px solid #3d2e22", boxShadow: "4px 0 20px rgba(0,0,0,0.2)" }}
+            onClick={() => currentUser?.role === "owner" && setActiveTab("settings")}
+            className={`flex flex-col items-center mb-6 p-3 -mx-3 rounded-xl transition-colors ${currentUser?.role === "owner" ? "cursor-pointer" : ""}`}
+            style={currentUser?.role === "owner" ? { cursor: "pointer" } : {}}
+            onMouseEnter={e => { if (currentUser?.role === "owner") e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            title={currentUser?.role === "owner" ? "Edit Restaurant Profile" : ""}
           >
-            <div className="p-6" style={{ borderBottom: "1px solid #3d2e22" }}>
-              <div
-                onClick={() => currentUser?.role === "owner" && setActiveTab("settings")}
-                className={`flex flex-col items-center mb-6 p-3 -mx-3 rounded-xl transition-colors ${currentUser?.role === "owner" ? "cursor-pointer" : ""}`}
-                style={currentUser?.role === "owner" ? { cursor: "pointer" } : {}}
-                onMouseEnter={e => { if (currentUser?.role === "owner") e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                title={currentUser?.role === "owner" ? "Edit Restaurant Profile" : ""}
-              >
-                {restroSettings?.logo_url ? (
-                  <img
-                    src={restroSettings.logo_url.startsWith('/') ? `${API_BASE_URL}${restroSettings.logo_url}` : restroSettings.logo_url}
-                    alt="Logo"
-                    className="w-16 h-16 object-contain rounded-xl bg-white p-1 mb-3"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-xl flex items-center justify-center mb-3" style={{ background: "rgba(194,112,62,0.15)" }}>
-                    <ChefHat className="w-8 h-8" style={{ color: "#c2703e" }} />
-                  </div>
-                )}
-                <h2 className="text-lg font-bold text-center leading-tight" style={{ color: "#f0e6d8" }}>
-                  {restroSettings?.restro_name || "My Restaurant"}
-                </h2>
+            {restroSettings?.logo_url ? (
+              <img
+                src={restroSettings.logo_url.startsWith('/') ? `${API_BASE_URL}${restroSettings.logo_url}` : restroSettings.logo_url}
+                alt="Logo"
+                className="w-16 h-16 object-contain rounded-xl bg-white p-1 mb-3"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-xl flex items-center justify-center mb-3" style={{ background: "rgba(194,112,62,0.15)" }}>
+                <ChefHat className="w-8 h-8" style={{ color: "#c2703e" }} />
               </div>
-
-              <h1 className="text-sm font-semibold uppercase tracking-wider flex items-center gap-2" style={{ color: "#8a7260" }}>
-                <LayoutDashboard className="w-4 h-4" style={{ color: "#c2703e" }} /> {currentUser?.role ? `${currentUser.role} Panel` : 'Panel'}
-              </h1>
-            </div>
-
-            <nav className="p-4 space-y-1.5 flex-1">
-              {([
-                { id: "orders", label: "Recent Orders", icon: ClipboardList },
-                { id: "menu", label: "Menu & Categories", icon: Utensils },
-                { id: "tables", label: "Table Management", icon: PlusCircle },
-                { id: "staff", label: "Staff Management", icon: Users },
-                { id: "place_order", label: "Place Order", icon: ShoppingBag },
-              ] as const).map(({ id, label, icon: Icon }) =>
-                hasPermission(id) && (
-                  <button
-                    key={id}
-                    onClick={() => setActiveTab(id as Tab)}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200"
-                    style={activeTab === id
-                      ? { background: "#c2703e", color: "#fff", boxShadow: "0 4px 14px rgba(194,112,62,0.3)" }
-                      : { color: "#8a7260" }
-                    }
-                    onMouseEnter={e => { if (activeTab !== id) { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "#f0e6d8"; e.currentTarget.style.transform = "translateX(4px)"; } }}
-                    onMouseLeave={e => { if (activeTab !== id) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#8a7260"; e.currentTarget.style.transform = ""; } }}
-                  >
-                    <Icon className="w-5 h-5" />
-                    {label}
-                    {id === "orders" && orders.filter(o => o.status === "new").length > 0 && (
-                      <span
-                        className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
-                        style={activeTab === "orders"
-                          ? { background: "rgba(255,255,255,0.2)", color: "#fff" }
-                          : { background: "#c2703e", color: "#fff" }
-                        }
-                      >
-                        {orders.filter(o => o.status === "new").length}
-                      </span>
-                    )}
-                  </button>
-                )
-              )}
-            </nav>
-
-            {/* User info + Logout */}
-            <div className="p-4" style={{ borderTop: "1px solid #3d2e22" }}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "#f0e6d8" }}>{currentUser?.username}</p>
-                  <p className="text-xs capitalize" style={{ color: "#8a7260" }}>{currentUser?.role}</p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 transition-colors rounded-lg"
-                  style={{ color: "#8a7260" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "#8a7260")}
-                  title="Logout"
-                >
-                  <LogOut className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
+            )}
+            <h2 className="text-lg font-bold text-center leading-tight" style={{ color: "#f0e6d8" }}>
+              {restroSettings?.restro_name || "My Restaurant"}
+            </h2>
           </div>
+
+          <h1 className="text-sm font-semibold uppercase tracking-wider flex items-center gap-2" style={{ color: "#8a7260" }}>
+            <LayoutDashboard className="w-4 h-4" style={{ color: "#c2703e" }} /> {currentUser?.role ? `${currentUser.role} Panel` : 'Panel'}
+          </h1>
+        </div>
+
+        <nav className="p-4 space-y-1.5 flex-1">
+          {([
+            { id: "home", label: "Home", icon: Home },
+            { id: "orders", label: "Recent Orders", icon: ClipboardList },
+            { id: "menu", label: "Menu & Categories", icon: Utensils },
+            { id: "tables", label: "Table Management", icon: PlusCircle },
+            { id: "staff", label: "Staff Management", icon: Users },
+            { id: "place_order", label: "Place Order", icon: ShoppingBag },
+          ] as const).map(({ id, label, icon: Icon }) =>
+            hasPermission(id) && (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id as Tab)}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200"
+                style={activeTab === id
+                  ? { background: "#c2703e", color: "#fff", boxShadow: "0 4px 14px rgba(194,112,62,0.3)" }
+                  : { color: "#8a7260" }
+                }
+                onMouseEnter={e => { if (activeTab !== id) { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "#f0e6d8"; e.currentTarget.style.transform = "translateX(4px)"; } }}
+                onMouseLeave={e => { if (activeTab !== id) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#8a7260"; e.currentTarget.style.transform = ""; } }}
+              >
+                <Icon className="w-5 h-5" />
+                {label}
+                {id === "orders" && orders.filter(o => o.status === "new").length > 0 && (
+                  <span
+                    className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={activeTab === "orders"
+                      ? { background: "rgba(255,255,255,0.2)", color: "#fff" }
+                      : { background: "#c2703e", color: "#fff" }
+                    }
+                  >
+                    {orders.filter(o => o.status === "new").length}
+                  </span>
+                )}
+              </button>
+            )
+          )}
+        </nav>
+
+        {/* User info + Logout */}
+        <div className="p-4" style={{ borderTop: "1px solid #3d2e22" }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: "#f0e6d8" }}>{currentUser?.username}</p>
+              <p className="text-xs capitalize" style={{ color: "#8a7260" }}>{currentUser?.role}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-2 transition-colors rounded-lg"
+              style={{ color: "#8a7260" }}
+              onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
+              onMouseLeave={e => (e.currentTarget.style.color = "#8a7260")}
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
         <div className={`flex-1 flex flex-col overflow-hidden ${activeTab === "menu" ? "" : "p-6 overflow-y-auto"} ${selectedOrder && activeTab === "orders" ? "hidden md:flex md:border-r md:border-gray-200" : ""}`}>
+
+          {/* Home Tab */}
+          {activeTab === "home" && hasPermission("home") && (
+            <div className="space-y-8 animate-fade-in">
+              {/* Greeting Section */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6" style={{ background: "linear-gradient(135deg, #fff9f5 0%, #ffffff 100%)" }}>
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900 mb-2">
+                    Welcome back, {currentUser?.username || "Staff"}! 👋
+                  </h2>
+                  <p className="text-gray-600 text-lg">
+                    Have a great day at {restroSettings.restro_name || "the restaurant"}.
+                  </p>
+                </div>
+                <div className="flex flex-col items-end text-right">
+                  <div className="text-2xl font-bold" style={{ color: "#c2703e" }}>
+                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  <div className="text-gray-600 font-medium">
+                    {currentTime.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Owner Statistics */}
+              {currentUser?.role === "owner" && dashboardStats && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {[
+                      { title: "Today's Sales", value: dashboardStats.today_sales, color: "#10b981", bg: "#d1fae5" },
+                      { title: "This Week", value: dashboardStats.week_sales, color: "#3b82f6", bg: "#dbeafe" },
+                      { title: "This Month", value: dashboardStats.month_sales, color: "#8b5cf6", bg: "#ede9fe" },
+                      { title: "This Year", value: dashboardStats.year_sales, color: "#f59e0b", bg: "#fef3c7" },
+                    ].map((stat, idx) => (
+                      <div key={idx} className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: stat.bg }}>
+                          <span className="font-bold text-lg" style={{ color: stat.color }}>₹</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide">{stat.title}</p>
+                          <h3 className="text-2xl font-bold text-gray-900">₹{stat.value.toFixed(2)}</h3>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Chart */}
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+                    <h3 className="text-xl font-bold text-gray-900 mb-6">Sales Trend (Last 7 Days)</h3>
+                    <div className="h-80 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={dashboardStats.chart_data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} tickFormatter={(val: any) => `₹${val}`} />
+                          <Tooltip 
+                            cursor={{ stroke: '#f3f4f6', strokeWidth: 2 }}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}
+                            formatter={(value: number) => [`₹${value.toFixed(2)}`, 'Sales']}
+                          />
+                          <Line type="monotone" dataKey="sales" stroke="#c2703e" strokeWidth={3} dot={{ fill: '#c2703e', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Orders Tab */}
           {activeTab === "orders" && hasPermission("orders") && (
@@ -923,7 +992,7 @@ const ALL_MODULES = [
               {/* ── Transfer Confirmation Modal ─────────────────────────── */}
               {showTransferConfirm && (() => {
                 const fromTable = restaurantTables.find(t => t.id.toString() === fromTableId);
-                const toTable   = restaurantTables.find(t => t.id.toString() === toTableId);
+                const toTable = restaurantTables.find(t => t.id.toString() === toTableId);
                 return (
                   <div
                     className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -980,7 +1049,7 @@ const ALL_MODULES = [
                           disabled={isSubmittingTransfer}
                           onClick={async () => {
                             setShowTransferConfirm(false);
-                            const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                            const fakeEvent = { preventDefault: () => { } } as React.FormEvent;
                             await handleTransferTableSubmit(fakeEvent);
                           }}
                           className="flex-1 font-bold py-2.5 rounded-xl text-sm transition-colors"
@@ -1002,7 +1071,7 @@ const ALL_MODULES = [
                   {orders.map((order) => (
                     <div key={order.id} onClick={() => handleViewOrder(order.id)}
                       className={`p-5 bg-white rounded-2xl border transition-all duration-300 cursor-pointer premium-shadow hover:premium-shadow-hover hover:-translate-y-1 ${selectedOrder?.id === order.id ? "-translate-y-1" : ""}`}
-                    style={{ borderColor: selectedOrder?.id === order.id ? "#c2703e" : "transparent", boxShadow: selectedOrder?.id === order.id ? "0 0 0 2px rgba(194,112,62,0.2)" : undefined }}
+                      style={{ borderColor: selectedOrder?.id === order.id ? "#c2703e" : "transparent", boxShadow: selectedOrder?.id === order.id ? "0 0 0 2px rgba(194,112,62,0.2)" : undefined }}
                     >
                       <div className="flex justify-between items-start mb-2">
                         <div>
@@ -1030,7 +1099,7 @@ const ALL_MODULES = [
           {/* Menu & Categories Tab — two-column master/detail */}
           {activeTab === "menu" && hasPermission("menu") && (() => {
             // Which category is "selected" — reuse expandedCategories[name] as single-select
-            const selectedCatName = Object.keys(expandedCategories).find(k => expandedCategories[k]) ?? null;
+            const selectedCatName = Object.keys(expandedCategories).find(k => expandedCategories[k]) ?? (categories.length > 0 ? categories[0].name : null);
             const selectedCat = categories.find(c => c.name === selectedCatName) ?? null;
             const activeCategoryNames = categories.map(c => c.name);
             const orphans = menuItems.filter(item => !activeCategoryNames.includes(item.category));
@@ -1398,111 +1467,134 @@ const ALL_MODULES = [
           })()}
 
 
-                    {/* Staff Tab */}
+          {/* Staff Tab */}
           {activeTab === "staff" && hasPermission("staff") && (
             <div>
-              <h2 className="text-2xl font-bold mb-6">Staff Management</h2>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold">Staff Management</h2>
+                {!(showAddStaffForm || editingManagerId) && (
+                  <button
+                    onClick={() => setShowAddStaffForm(true)}
+                    className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                    style={{ background: "#4a6741", color: "#fff" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#3d5636")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "#4a6741")}
+                  >
+                    <PlusCircle className="w-4 h-4" /> Add Staff
+                  </button>
+                )}
+              </div>
 
               {/* Create OR Edit Manager Form */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                  <PlusCircle className="w-5 h-5" style={{ color: "#c2703e" }} />
-                  {editingManagerId ? "Edit Manager Account" : "Add New Manager"}
-                </h3>
-                <form onSubmit={editingManagerId ? handleUpdateManager : handleCreateManager} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1.5">Username</label>
-                      <input
-                        type="text"
-                        id="new-manager-username"
-                        value={newManagerUsername}
-                        onChange={(e) => setNewManagerUsername(e.target.value)}
-                        required
-                        placeholder="e.g. manager_ram"
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1.5">
-                        Password {editingManagerId && <span className="text-gray-700 font-normal">(leave blank to keep unchanged)</span>}
-                      </label>
-                      <div className="relative">
+              {(showAddStaffForm || editingManagerId) && (
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <PlusCircle className="w-5 h-5" style={{ color: "#c2703e" }} />
+                      {editingManagerId ? "Edit Manager Account" : "Add New Manager"}
+                    </h3>
+                    <button
+                      onClick={() => { setShowAddStaffForm(false); handleCancelEditManager(); }}
+                      className="text-sm text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <form onSubmit={editingManagerId ? handleUpdateManager : handleCreateManager} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1.5">Username</label>
                         <input
-                          type={showNewPassword ? "text" : "password"}
-                          id="new-manager-password"
-                          value={newManagerPassword}
-                          onChange={(e) => setNewManagerPassword(e.target.value)}
-                          required={!editingManagerId}
-                          placeholder={editingManagerId ? "Leave blank to keep current" : "Min. 6 characters"}
-                          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:outline-none"
+                          type="text"
+                          id="new-manager-username"
+                          value={newManagerUsername}
+                          onChange={(e) => setNewManagerUsername(e.target.value)}
+                          required
+                          placeholder="e.g. manager_ram"
+                          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none"
                         />
-                        <button type="button" onClick={() => setShowNewPassword(!showNewPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1.5">
+                          Password {editingManagerId && <span className="text-gray-700 font-normal">(leave blank to keep unchanged)</span>}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showNewPassword ? "text" : "password"}
+                            id="new-manager-password"
+                            value={newManagerPassword}
+                            onChange={(e) => setNewManagerPassword(e.target.value)}
+                            required={!editingManagerId}
+                            placeholder={editingManagerId ? "Leave blank to keep current" : "Min. 6 characters"}
+                            className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:outline-none"
+                          />
+                          <button type="button" onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1.5">Role</label>
+                        <select
+                          value={newManagerRole}
+                          onChange={(e) => setNewManagerRole(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none"
                         >
-                          {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
+                          <option value="manager">Manager</option>
+                          <option value="staff">Staff/Waiter</option>
+                        </select>
                       </div>
                     </div>
+
+                    {/* Module Access Checkboxes */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1.5">Role</label>
-                      <select
-                        value={newManagerRole}
-                        onChange={(e) => setNewManagerRole(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none"
-                      >
-                        <option value="manager">Manager</option>
-                        <option value="staff">Staff/Waiter</option>
-                      </select>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Module Access Permissions</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        {ALL_MODULES.map((mod) => {
+                          const checked = selectedPermissions.includes(mod.id);
+                          return (
+                            <label key={mod.id} className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all" style={checked ? { background: "#f5ebe4", borderColor: "#c4956a" } : { background: "#fff", borderColor: "#e5e7eb" }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => togglePermission(mod.id)}
+                                className="mt-1 rounded"
+                                style={{ accentColor: "#c2703e" }}
+                              />
+                              <div>
+                                <p className="text-xs font-bold text-gray-800">{mod.label}</p>
+                                <p className="text-[11px] text-gray-800 leading-snug">{mod.desc}</p>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Module Access Checkboxes */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Module Access Permissions</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-                      {ALL_MODULES.map((mod) => {
-                        const checked = selectedPermissions.includes(mod.id);
-                        return (
-                          <label key={mod.id} className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all" style={checked ? { background: "#f5ebe4", borderColor: "#c4956a" } : { background: "#fff", borderColor: "#e5e7eb" }}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => togglePermission(mod.id)}
-                              className="mt-1 rounded"
-                              style={{ accentColor: "#c2703e" }}
-                            />
-                            <div>
-                              <p className="text-xs font-bold text-gray-800">{mod.label}</p>
-                              <p className="text-[11px] text-gray-800 leading-snug">{mod.desc}</p>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {staffError && <p className="text-red-500 text-sm">{staffError}</p>}
-                  {staffSuccess && <p className="text-green-600 text-sm">{staffSuccess}</p>}
-                  <div className="flex gap-3">
-                    <button type="submit" disabled={isCreatingManager}
-                      className="font-semibold px-6 py-2.5 rounded-lg transition-colors"
-                      style={{ background: "#c2703e", color: "#fff", opacity: isCreatingManager ? 0.5 : 1 }}
-                    >
-                      {isCreatingManager
-                        ? (editingManagerId ? "Saving..." : "Creating...")
-                        : (editingManagerId ? "Save Changes" : "Create Staff Account")}
-                    </button>
-                    {editingManagerId && (
-                      <button type="button" onClick={handleCancelEditManager}
-                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-lg transition-colors"
+                    {staffError && <p className="text-red-500 text-sm">{staffError}</p>}
+                    {staffSuccess && <p className="text-green-600 text-sm">{staffSuccess}</p>}
+                    <div className="flex gap-3">
+                      <button type="submit" disabled={isCreatingManager}
+                        className="font-semibold px-6 py-2.5 rounded-lg transition-colors"
+                        style={{ background: "#c2703e", color: "#fff", opacity: isCreatingManager ? 0.5 : 1 }}
                       >
-                        Cancel
+                        {isCreatingManager
+                          ? (editingManagerId ? "Saving..." : "Creating...")
+                          : (editingManagerId ? "Save Changes" : "Create Staff Account")}
                       </button>
-                    )}
-                  </div>
-                </form>
-              </div>
+                      {editingManagerId && (
+                        <button type="button" onClick={handleCancelEditManager}
+                          className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-lg transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
 
               {/* Manager List */}
               <h3 className="font-bold text-lg mb-4">Current Staff Accounts ({managers.length})</h3>
@@ -1560,36 +1652,70 @@ const ALL_MODULES = [
             <div>
               <h2 className="text-2xl font-bold mb-6">Table Management</h2>
 
-              {/* Add Table Form */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8 print:hidden">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                  <PlusCircle className="w-5 h-5" style={{ color: "#c2703e" }} /> Add New Table
-                </h3>
-                <form onSubmit={handleAddTable} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1.5">Table Number</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={newTableNumber}
-                        onChange={(e) => setNewTableNumber(e.target.value)}
-                        required
-                        placeholder="e.g. 11"
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none"
-                      />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 print:hidden">
+                {/* Add Table Form */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col justify-center">
+                  <h3 className="font-bold text-lg mb-2 flex items-center gap-2 text-gray-900">
+                    <PlusCircle className="w-5 h-5" style={{ color: "#c2703e" }} /> Add New Table
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-6">Create a new table and generate its QR code.</p>
+                  
+                  <form onSubmit={handleAddTable} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1.5">Table Number</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={newTableNumber}
+                          onChange={(e) => setNewTableNumber(e.target.value)}
+                          required
+                          placeholder="e.g. 11"
+                          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button type="submit" disabled={isAddingTable}
+                          className="w-full font-semibold px-6 py-2.5 rounded-lg transition-colors flex items-center justify-center h-[42px]"
+                          style={{ background: "#c2703e", color: "#fff", opacity: isAddingTable ? 0.7 : 1 }}
+                        >
+                          {isAddingTable ? "Adding..." : "Add Table"}
+                        </button>
+                      </div>
                     </div>
-                    {/* QR Identifier is now auto-generated */}
+                    {tableError && <p className="text-red-500 text-sm mt-2">{tableError}</p>}
+                    {tableSuccess && <p className="text-green-600 text-sm mt-2">{tableSuccess}</p>}
+                  </form>
+                </div>
+
+                {/* Table Info Widget */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <LayoutGrid className="w-5 h-5" style={{ color: "#c2703e" }} />
+                    <h3 className="font-bold text-lg text-gray-900">Table Info</h3>
                   </div>
-                  {tableError && <p className="text-red-500 text-sm">{tableError}</p>}
-                  {tableSuccess && <p className="text-green-600 text-sm">{tableSuccess}</p>}
-                  <button type="submit" disabled={isAddingTable}
-                    className="font-semibold px-6 py-2.5 rounded-lg transition-colors"
-                    style={{ background: "#c2703e", color: "#fff", opacity: isAddingTable ? 0.5 : 1 }}
-                  >
-                    {isAddingTable ? "Adding..." : "Add Table"}
-                  </button>
-                </form>
+                  <p className="text-sm text-gray-500 mb-6">Real-time status of your dining floor.</p>
+                  
+                  <hr className="border-gray-100 mb-6" />
+
+                  <div className="flex gap-4">
+                    <div className="flex-1 rounded-xl p-4 flex items-center gap-4 border" style={{ backgroundColor: "#fffdf9", borderColor: "#fbe4d4" }}>
+                      <span className="text-4xl font-extrabold" style={{ color: "#c2703e" }}>{restaurantTables.length}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-0.5">Total</span>
+                        <span className="text-sm font-medium text-gray-500 leading-none">Tables</span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 rounded-xl p-4 flex items-center gap-4 border" style={{ backgroundColor: "#fef8f8", borderColor: "#fce8e8" }}>
+                      <span className="text-4xl font-extrabold text-red-500">{restaurantTables.filter(t => t.status === "occupied").length}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-0.5">In Use</span>
+                        <span className="text-sm font-medium text-gray-500 leading-none">Now</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Tables List & QR Codes */}
@@ -1605,7 +1731,7 @@ const ALL_MODULES = [
                   <Printer className="w-4 h-4" /> Print QR Sheet
                 </button>
               </div>
-              
+
               {restaurantTables.length === 0 ? (
                 <div className="text-center py-8 text-gray-800 bg-white rounded-xl border border-dashed border-gray-300 print:hidden">
                   No tables found.
@@ -1614,35 +1740,59 @@ const ALL_MODULES = [
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 print:gap-4 print:grid-cols-3">
                   {restaurantTables.map((t) => {
                     const orderUrl = `${baseUrl}/menu?table=${t.qr_identifier}`;
+                    const isOccupied = t.status === "occupied";
+                    const isUpdating = updatingTableId === t.id;
                     return (
-                      <div key={t.id} className="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col items-center justify-center text-center shadow-sm print:border-dashed print:border-gray-400 print:shadow-none print:break-inside-avoid">
-                        <div className="mb-4 font-bold text-xl text-gray-900 bg-gray-100 px-4 py-1 rounded-full print:bg-white print:border">
+                      <div key={t.id} className="bg-white rounded-2xl border p-6 flex flex-col items-center justify-center text-center shadow-sm print:border-dashed print:border-gray-400 print:shadow-none print:break-inside-avoid"
+                        style={{ borderColor: isOccupied ? "#f97316" : "#e5e7eb" }}>
+
+                        {/* Status Badge */}
+                        <div className="w-full flex justify-between items-center mb-3 print:hidden">
+                          <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                            style={isOccupied
+                              ? { background: "#fff3e0", color: "#c2703e", border: "1px solid #f97316" }
+                              : { background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac" }}>
+                            {isOccupied ? "🔴 In Use" : "🟢 Available"}
+                          </span>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => handleMarkTableStatus(t.id, t.table_number, t.status)}
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors"
+                            style={isOccupied
+                              ? { background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac" }
+                              : { background: "#fff3e0", color: "#c2703e", border: "1px solid #f97316" }}
+                          >
+                            {isUpdating ? "..." : isOccupied ? "Mark Available" : "Mark In Use"}
+                          </button>
+                        </div>
+
+                        <div className="mb-2 font-bold text-xl text-gray-900 bg-gray-100 px-4 py-1 rounded-full print:bg-white print:border">
                           Table {t.table_number}
                         </div>
-                        
+
                         <div id={`qr-svg-${t.table_number}`} className="bg-white p-2 rounded-xl mb-4 border border-gray-100 print:border-0">
-                          <QRCodeSVG 
-                            value={orderUrl} 
-                            size={160} 
-                            level="H" 
-                            includeMargin={true} 
+                          <QRCodeSVG
+                            value={orderUrl}
+                            size={140}
+                            level="H"
+                            includeMargin={true}
                           />
                         </div>
-                        
-                        <p className="text-xs text-gray-700 font-mono break-all max-w-full mt-2 print:text-black">
+
+                        <p className="text-xs text-gray-700 font-mono break-all max-w-full mt-1 print:text-black">
                           {orderUrl}
                         </p>
-                        <p className="text-sm font-medium mt-2 print:text-black" style={{ color: "#c2703e" }}>
+                        <p className="text-sm font-medium mt-1 print:text-black" style={{ color: "#c2703e" }}>
                           Scan to order food
                         </p>
-                        
-                        <button 
+
+                        <button
                           onClick={(e) => { e.stopPropagation(); handleDownloadQR(t.table_number); }}
                           className="mt-3 flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors print:hidden"
                         >
                           <Download className="w-3.5 h-3.5" /> Download QR
                         </button>
-                        <button 
+                        <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteTable(t.id, t.table_number); }}
                           className="mt-2 flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors print:hidden"
                         >
@@ -1664,7 +1814,7 @@ const ALL_MODULES = [
 
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                 <form onSubmit={handleSaveSettings} className="space-y-6">
-                  
+
                   {/* Restaurant Name */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Restaurant Name <span className="text-red-500">*</span></label>
@@ -1718,7 +1868,7 @@ const ALL_MODULES = [
                       </label>
                       <span className="text-xs text-gray-800">Max size: 5MB. Formats: PNG, JPG, WEBP.</span>
                     </div>
-                    
+
                     {/* Live logo preview */}
                     {restroSettings.logo_url && (
                       <div className="mt-4 flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
@@ -1852,6 +2002,37 @@ const ALL_MODULES = [
           </div>
         )}
       </div>
+
+      {/* ── Unpaid Warning Dialog ──────────────────────────────────────────── */}
+      {unpaidWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4">
+            <div className="text-3xl text-center mb-3">⚠️</div>
+            <h3 className="font-bold text-lg text-center text-gray-900 mb-2">
+              Payment Not Confirmed
+            </h3>
+            <p className="text-sm text-gray-600 text-center mb-6">
+              Table <strong>{unpaidWarning.tableNumber}</strong> may still have an unpaid bill. 
+              Are you sure you want to mark it as <strong>Available</strong>?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUnpaidWarning(null)}
+                className="flex-1 py-2.5 rounded-xl font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => doUpdateTableStatus(unpaidWarning.tableId, "available")}
+                className="flex-1 py-2.5 rounded-xl font-semibold text-white transition-colors"
+                style={{ background: "#c2703e" }}
+              >
+                Yes, Mark Available
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

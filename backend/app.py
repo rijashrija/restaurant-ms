@@ -88,6 +88,7 @@ from routes.table_routes import table_bp
 from routes.auth_routes import auth_bp
 from routes.settings_routes import settings_bp
 from routes.category_routes import category_bp
+from routes.dashboard_routes import dashboard_bp
 from database.connection import get_db_connection
 
 
@@ -126,6 +127,7 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(category_bp)
+    app.register_blueprint(dashboard_bp)
 
     # ── Health Check Endpoint ─────────────────────────────────────────────
     # A health check is a simple endpoint we can call to verify

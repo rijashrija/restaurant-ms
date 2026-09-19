@@ -51,16 +51,22 @@ order_bp = Blueprint("order", __name__)
 @order_bp.route("/api/orders", methods=["POST"])
 def create_order():
     """
-    Creates a new order and all its items safely using a transaction.
+    Places an order for a table.
 
-    Expected request JSON:
-    {
-      "table_id": 5,
-      "items": [
-        { "menu_item_id": 1, "quantity": 2 },
-        { "menu_item_id": 4, "quantity": 1 }
-      ]
-    }
+    OPEN-TAB LOGIC:
+    ----------------
+    If the table already has an active unpaid order (status: new / preparing / ready),
+    we treat it as the SAME customer still sitting. New items are appended to that
+    existing order — no new order row is created.
+
+    If the table has NO active order (table is free / all previous orders are
+    completed or cancelled), a brand-new order is created.
+
+    This means:
+      - Customer orders Coke → Order #5 created for Table 2
+      - Same customer orders Fanta → items added to Order #5 (same bill)
+      - Manager marks Order #5 as completed (customer paid & left)
+      - Next customer orders from Table 2 → Order #6 created (fresh bill)
     """
     conn = None
     cursor = None
@@ -90,23 +96,38 @@ def create_order():
                 if payload.get("role") in ["owner", "manager", "staff"]:
                     placed_by_user_id = payload.get("user_id")
             except:
-                pass # Ignore invalid tokens for placing orders, fallback to customer
+                pass
 
         # ── 2. Verify Table Exists ─────────────────────────────────────────
         cursor.execute("SELECT id FROM restaurant_tables WHERE id = %s", (table_id,))
         if not cursor.fetchone():
             return error_response(f"Table {table_id} does not exist", 404)
 
-        # ── 3. Start Transaction & Insert Order Header ─────────────────────
-        # Note: autocommit=False in connection.py means a transaction is
-        # implicitly started. We just need to commit() at the very end.
-
-        # Status defaults to 'new' in the database
+        # ── 3. Open-Tab Check ──────────────────────────────────────────────
+        # Look for an existing active (unpaid) order on this table.
+        # Active = status is 'new', 'preparing', or 'ready' (not completed/cancelled).
         cursor.execute(
-            "INSERT INTO orders (table_id, placed_by_user_id) VALUES (%s, %s)",
-            (table_id, placed_by_user_id)
+            "SELECT id FROM orders WHERE table_id = %s AND status IN ('new', 'preparing', 'ready') "
+            "ORDER BY created_at DESC LIMIT 1",
+            (table_id,)
         )
-        order_id = cursor.lastrowid
+        existing_order = cursor.fetchone()
+
+        is_merged = False
+        if existing_order:
+            # ── Same customer (table still occupied) ──
+            # Append items to the existing order instead of creating a new row.
+            order_id = existing_order["id"]
+            is_merged = True
+        else:
+            # ── New customer (table was free) ──
+            # Create a fresh order row.
+            cursor.execute(
+                "INSERT INTO orders (table_id, placed_by_user_id) VALUES (%s, %s)",
+                (table_id, placed_by_user_id)
+            )
+            order_id = cursor.lastrowid
+
         total_price = 0.0
 
         # ── 4. Process Each Item ───────────────────────────────────────────
@@ -115,14 +136,13 @@ def create_order():
             quantity = item.get("quantity")
 
             if not menu_item_id or not quantity:
-                conn.rollback() # Undo the order creation!
+                conn.rollback()
                 return error_response("Each item must have menu_item_id and quantity", 400)
 
             if int(quantity) < 1:
                 conn.rollback()
                 return error_response("Quantity must be at least 1", 400)
 
-            # Look up the menu item to get its CURRENT price and availability
             cursor.execute(
                 "SELECT name, price, is_available FROM menu_items WHERE id = %s",
                 (menu_item_id,)
@@ -137,31 +157,42 @@ def create_order():
                 conn.rollback()
                 return error_response(f"Sorry, '{menu_item['name']}' is currently unavailable", 400)
 
-            # Snap the price (what it costs RIGHT NOW)
             current_price = float(menu_item["price"])
             total_price += (current_price * int(quantity))
 
-            # Insert the order item
             cursor.execute(
                 "INSERT INTO order_items (order_id, menu_item_id, quantity, price) "
                 "VALUES (%s, %s, %s, %s)",
                 (order_id, menu_item_id, quantity, current_price)
             )
 
-        # ── 5. Commit Transaction ──────────────────────────────────────────
-        # If we reached this line, EVERYTHING worked.
-        # Now we permanently save all inserts to the database.
+        # ── 5. Auto-lock the table when a brand-new order is created ─────────
+        # If this is a fresh order (not merged into existing), mark the table
+        # as 'occupied' so that any customer who scans the QR code sees the
+        # "Table In Use" screen instead of the menu.
+        if not is_merged:
+            cursor.execute(
+                "UPDATE restaurant_tables SET status = 'occupied' WHERE id = %s",
+                (table_id,)
+            )
+
+        # ── 6. Commit ──────────────────────────────────────────────────────
         conn.commit()
 
+        message = (
+            "Items added to your existing order!" if is_merged
+            else "Order placed successfully!"
+        )
+
         return success_response({
-            "message": "Order placed successfully!",
+            "message": message,
             "order_id": order_id,
             "total_price": total_price,
-            "status": "new"
+            "status": "new",
+            "merged": is_merged
         }, 201)
 
     except Exception as e:
-        # If ANYTHING failed (Python error, DB error), rollback everything
         if conn:
             conn.rollback()
         print(f"[ERROR] create_order: {e}")
@@ -329,16 +360,38 @@ def update_order_status(order_id):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Check if order exists
-        cursor.execute("SELECT id FROM orders WHERE id = %s", (order_id,))
-        if not cursor.fetchone():
+        # Check if order exists and get its table_id
+        cursor.execute("SELECT id, table_id FROM orders WHERE id = %s", (order_id,))
+        order = cursor.fetchone()
+        if not order:
             return error_response(f"Order #{order_id} not found", 404)
 
-        # Update status
+        table_id = order["table_id"]
+
+        # Update the order status
         cursor.execute(
             "UPDATE orders SET status = %s WHERE id = %s",
             (status, order_id)
         )
+
+        # ── Auto-unlock table when payment is done ─────────────────────────
+        # When an order is marked 'completed' or 'cancelled', check if the
+        # table still has any remaining active orders. If none remain, the
+        # customer has left and the table is free again.
+        if status in ("completed", "cancelled"):
+            cursor.execute(
+                "SELECT COUNT(*) AS remaining FROM orders "
+                "WHERE table_id = %s AND status IN ('new', 'preparing', 'ready') "
+                "AND id != %s",
+                (table_id, order_id)
+            )
+            remaining = cursor.fetchone()["remaining"]
+            if remaining == 0:
+                cursor.execute(
+                    "UPDATE restaurant_tables SET status = 'available' WHERE id = %s",
+                    (table_id,)
+                )
+
         conn.commit()
 
         return success_response({

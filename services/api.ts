@@ -112,6 +112,14 @@ export async function toggleCategory(id: number, isActive: boolean, token: strin
   if (!res.ok) throw new Error(data.error || "Failed to toggle category");
 }
 
+export async function getDashboardStats(token: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/api/dashboard/stats`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to fetch dashboard stats");
+  return data;
+}
 
 /**
  * Verifies if the scanned QR code identifier belongs to a valid table.
@@ -275,6 +283,20 @@ export async function deleteTable(tableId: number, token: string) {
     throw new Error(data.error || "Failed to delete table");
   }
   return res.json();
+}
+
+export async function updateTableStatus(tableId: number, status: "available" | "occupied", token: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tables/${tableId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update table status");
+  return data;
 }
 
 // ── Menu Management ─────────────────────────────────────────────────────────

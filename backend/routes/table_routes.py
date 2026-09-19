@@ -225,9 +225,14 @@ def get_all_tables():
         cursor = conn.cursor(dictionary=True)
 
         cursor.execute(
-            "SELECT id, table_number, qr_identifier, status, created_at "
-            "FROM restaurant_tables "
-            "ORDER BY table_number ASC"
+            """
+            SELECT t.id, t.table_number, t.qr_identifier, t.status, t.created_at,
+                   COUNT(o.id) AS active_orders
+            FROM restaurant_tables t
+            LEFT JOIN orders o ON t.id = o.table_id AND o.status IN ('new', 'preparing', 'ready')
+            GROUP BY t.id
+            ORDER BY t.table_number ASC
+            """
         )
         tables = cursor.fetchall()
 
@@ -237,6 +242,13 @@ def get_all_tables():
         for table in tables:
             if table.get("created_at"):
                 table["created_at"] = table["created_at"].isoformat()
+            
+            # Dual-layer check: if there are active orders, the table is effectively occupied
+            if table["active_orders"] > 0:
+                table["status"] = "occupied"
+            
+            # Remove the count so it doesn't mess with frontend types
+            del table["active_orders"]
 
         return success_response(tables, 200)
 
@@ -409,15 +421,40 @@ def verify_table(identifier):
                 f"Invalid QR code. Table '{identifier}' not found.", 404
             )
 
-        # Return the table info so the frontend knows:
-        # - The table's numeric ID (to send with orders)
-        # - The table number to display: "Table 3"
-        # - The status (available / occupied)
+        # ── Dual-layer occupied check ──────────────────────────────────────
+        # We check BOTH:
+        #   1. The status column (set manually by staff or auto-set by order events)
+        #   2. Whether the table actually has active unpaid orders in the DB
+        #
+        # This makes the system self-correcting: even if the status column
+        # is stale or was manually cleared by mistake, a table with active
+        # orders will still be correctly reported as occupied.
+        is_occupied_by_status = table["status"] == "occupied"
+
+        cursor.execute(
+            "SELECT COUNT(*) AS active_count FROM orders "
+            "WHERE table_id = %s AND status IN ('new', 'preparing', 'ready')",
+            (table["id"],)
+        )
+        active_orders = cursor.fetchone()["active_count"]
+        is_occupied_by_orders = active_orders > 0
+
+        # If either check says occupied → the table is in use
+        effective_status = "occupied" if (is_occupied_by_status or is_occupied_by_orders) else "available"
+
+        # Keep DB in sync: if orders say occupied but status column disagrees, fix it
+        if is_occupied_by_orders and not is_occupied_by_status:
+            cursor.execute(
+                "UPDATE restaurant_tables SET status = 'occupied' WHERE id = %s",
+                (table["id"],)
+            )
+            conn.commit()
+
         return success_response({
             "id": table["id"],
             "table_number": table["table_number"],
             "qr_identifier": table["qr_identifier"],
-            "status": table["status"],
+            "status": effective_status,
             "message": f"Table {table['table_number']} verified successfully"
         }, 200)
 
@@ -431,3 +468,55 @@ def verify_table(identifier):
         if conn:
             conn.close()
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# PATCH /api/tables/<id>/status
+# Staff marks a table as "occupied" or "available" manually
+# ══════════════════════════════════════════════════════════════════════════
+@table_bp.route("/api/tables/<int:table_id>/status", methods=["PATCH"])
+@require_auth
+def update_table_status(table_id):
+    """
+    Allows any authenticated staff member (owner/manager/waiter) to manually
+    set a table's status to 'occupied' or 'available'.
+    """
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            return error_response("Request body must be valid JSON", 400)
+
+        status = data.get("status", "").lower()
+        if status not in ("available", "occupied"):
+            return error_response("status must be 'available' or 'occupied'", 400)
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT id, table_number FROM restaurant_tables WHERE id = %s", (table_id,))
+        table = cursor.fetchone()
+        if not table:
+            return error_response(f"Table {table_id} not found", 404)
+
+        cursor.execute(
+            "UPDATE restaurant_tables SET status = %s WHERE id = %s",
+            (status, table_id)
+        )
+        conn.commit()
+
+        return success_response({
+            "message": f"Table {table['table_number']} marked as {status}",
+            "table_id": table_id,
+            "table_number": table["table_number"],
+            "status": status
+        }, 200)
+
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[ERROR] update_table_status: {e}")
+        return error_response("Failed to update table status", 500)
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()

@@ -48,6 +48,8 @@ function MenuContent() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tableOccupied, setTableOccupied] = useState(false);
+  const [occupiedTableNumber, setOccupiedTableNumber] = useState<number | null>(null);
   
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderConfirmed, setOrderConfirmed] = useState<{ id: number; total: number } | null>(null);
@@ -62,9 +64,19 @@ function MenuContent() {
       }
 
       try {
-        // Run both requests at the same time for better performance
-        const [tableData, menuData, brandingData, categoriesData] = await Promise.all([
-          verifyTable(tableIdentifier),
+        // First verify the table exists and check its status
+        const tableData = await verifyTable(tableIdentifier);
+
+        // If the table is occupied by another customer, block access
+        if (tableData.status === "occupied") {
+          setTableOccupied(true);
+          setOccupiedTableNumber(tableData.table_number);
+          setIsLoading(false);
+          return;
+        }
+
+        // Table is available — load the rest
+        const [menuData, brandingData, categoriesData] = await Promise.all([
           getMenu(),
           getRestaurantSettings(),
           getCategories()
@@ -168,6 +180,29 @@ function MenuContent() {
       setIsPlacingOrder(false);
     }
   };
+
+  // ── Render Table Occupied Screen ────────────────────────────────────────
+  if (tableOccupied) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: C.pageBg, color: C.text }}>
+        <div className="p-8 rounded-2xl shadow-lg text-center max-w-sm w-full" style={{ background: C.cardBg, border: "1px solid #fca5a5" }}>
+          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5" style={{ background: "#fee2e2" }}>
+            <span className="text-4xl">🔒</span>
+          </div>
+          <h1 className="text-2xl font-bold mb-2" style={{ color: C.text }}>
+            Table {occupiedTableNumber} is Occupied
+          </h1>
+          <p className="text-sm mb-6" style={{ color: C.muted }}>
+            This table already has an active order in progress. Please speak to a waiter or check that you have scanned the correct QR code.
+          </p>
+          <div className="rounded-xl p-4 text-sm" style={{ background: "#fef9f0", border: "1px solid #f5d0a0", color: "#92400e" }}>
+            <p className="font-semibold mb-1">Are you the customer at this table?</p>
+            <p className="opacity-80">Ask your waiter to clear the table status so you can place an order.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Render Error State ──────────────────────────────────────────────────
   if (error && !table) {
@@ -390,34 +425,48 @@ function MenuContent() {
       <div className="flex-1 p-4 md:p-8 overflow-y-auto">
         
         {/* Header */}
-        <header className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            {branding?.logo_url && (
+        <header className="mb-8 flex justify-between items-start">
+          {/* Left: Greetings & Table Info */}
+          <div>
+            <h1 className="text-3xl font-bold mb-2" style={{ color: C.text }}>
+              {(() => {
+                const hour = new Date().getHours();
+                if (hour < 12) return "Good Morning";
+                if (hour < 17) return "Good Afternoon";
+                return "Good Evening";
+              })()}!
+            </h1>
+            <p className="mt-2" style={{ color: C.text }}>
+              Currently seated at{" "}
+              <span
+                className="font-semibold px-2 py-0.5 rounded-md"
+                style={{ color: C.primary, background: C.tagBg }}
+              >
+                Table {table?.table_number}
+              </span>
+            </p>
+            {branding?.description && <p className="text-sm mt-2" style={{ color: C.muted }}>{branding.description}</p>}
+          </div>
+          
+          {/* Right: Restaurant Branding */}
+          <div className="flex items-center gap-3 text-right">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2 justify-end">
+                {branding?.restro_name || "My Restaurant"}
+              </h2>
+              {branding?.tagline && <p className="text-xs" style={{ color: C.muted }}>{branding.tagline}</p>}
+            </div>
+            {branding?.logo_url ? (
               <img
                 src={branding.logo_url.startsWith('/') ? `${API_BASE_URL}${branding.logo_url}` : branding.logo_url}
                 alt="Logo"
                 className="w-12 h-12 object-contain rounded-xl"
                 style={{ border: `1px solid ${C.cardBorder}`, background: "#fff" }}
               />
+            ) : (
+              <ChefHat className="w-10 h-10" style={{ color: C.primary }} />
             )}
-            <div>
-              <h1 className="text-3xl font-bold flex items-center gap-2">
-                {!branding?.logo_url && <ChefHat style={{ color: C.primary }} />}
-                {branding?.restro_name || "My Restaurant"}
-              </h1>
-              {branding?.tagline && <p className="text-sm" style={{ color: C.muted }}>{branding.tagline}</p>}
-            </div>
           </div>
-          <p className="mt-2" style={{ color: C.text }}>
-            Currently seated at{" "}
-            <span
-              className="font-semibold px-2 py-0.5 rounded-md"
-              style={{ color: C.primary, background: C.tagBg }}
-            >
-              Table {table?.table_number}
-            </span>
-          </p>
-          {branding?.description && <p className="text-sm mt-2" style={{ color: C.muted }}>{branding.description}</p>}
         </header>
         
         {/* Category Filters */}
