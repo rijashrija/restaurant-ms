@@ -48,8 +48,6 @@ function MenuContent() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tableOccupied, setTableOccupied] = useState(false);
-  const [occupiedTableNumber, setOccupiedTableNumber] = useState<number | null>(null);
   
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderConfirmed, setOrderConfirmed] = useState<{ id: number; total: number } | null>(null);
@@ -67,15 +65,7 @@ function MenuContent() {
         // First verify the table exists and check its status
         const tableData = await verifyTable(tableIdentifier);
 
-        // If the table is occupied by another customer, block access
-        if (tableData.status === "occupied") {
-          setTableOccupied(true);
-          setOccupiedTableNumber(tableData.table_number);
-          setIsLoading(false);
-          return;
-        }
-
-        // Table is available — load the rest
+        // Table is available or we are appending to an existing order — load the rest
         const [menuData, brandingData, categoriesData] = await Promise.all([
           getMenu(),
           getRestaurantSettings(),
@@ -181,28 +171,7 @@ function MenuContent() {
     }
   };
 
-  // ── Render Table Occupied Screen ────────────────────────────────────────
-  if (tableOccupied) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: C.pageBg, color: C.text }}>
-        <div className="p-8 rounded-2xl shadow-lg text-center max-w-sm w-full" style={{ background: C.cardBg, border: "1px solid #fca5a5" }}>
-          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5" style={{ background: "#fee2e2" }}>
-            <span className="text-4xl">🔒</span>
-          </div>
-          <h1 className="text-2xl font-bold mb-2" style={{ color: C.text }}>
-            Table {occupiedTableNumber} is Occupied
-          </h1>
-          <p className="text-sm mb-6" style={{ color: C.muted }}>
-            This table already has an active order in progress. Please speak to a waiter or check that you have scanned the correct QR code.
-          </p>
-          <div className="rounded-xl p-4 text-sm" style={{ background: "#fef9f0", border: "1px solid #f5d0a0", color: "#92400e" }}>
-            <p className="font-semibold mb-1">Are you the customer at this table?</p>
-            <p className="opacity-80">Ask your waiter to clear the table status so you can place an order.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+
 
   // ── Render Error State ──────────────────────────────────────────────────
   if (error && !table) {
