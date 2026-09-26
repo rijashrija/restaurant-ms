@@ -877,6 +877,7 @@ export default function AdminDashboard() {
                           <Tooltip 
                             cursor={{ stroke: '#f3f4f6', strokeWidth: 2 }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}
+                            // @ts-ignore
                             formatter={(value: any) => [`₹${Number(value || 0).toFixed(2)}`, 'Sales']}
                           />
                           <Line type="monotone" dataKey="sales" stroke="#c2703e" strokeWidth={3} dot={{ fill: '#c2703e', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
@@ -1772,6 +1773,7 @@ export default function AdminDashboard() {
                         </div>
 
                         <div id={`qr-svg-${t.table_number}`} className="bg-white p-2 rounded-xl mb-4 border border-gray-100 print:border-0">
+                          {/* @ts-ignore */}
                           <QRCodeSVG
                             value={orderUrl}
                             size={140}
