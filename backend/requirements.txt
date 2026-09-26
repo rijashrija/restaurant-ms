@@ -3,3 +3,5 @@ flask-cors==5.0.0
 mysql-connector-python==9.3.0
 python-dotenv==1.1.1
 PyJWT==2.13.0
+gunicorn==23.0.0
+
