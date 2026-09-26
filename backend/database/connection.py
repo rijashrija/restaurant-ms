@@ -95,10 +95,15 @@ def get_db_connection():
             "database": Config.DB_NAME,
             "autocommit": False,
         }
-        # If connecting to remote cloud database (e.g. Aiven), configure SSL flexible validation
-        if "localhost" not in Config.DB_HOST and "127.0.0.1" not in Config.DB_HOST:
-            conn_args["ssl_disabled"] = False
-            conn_args["ssl_verify_identity"] = False
+        # If connecting to remote cloud database (e.g. Aiven), configure SSL parameters with fallback
+        if "localhost" not in str(Config.DB_HOST) and "127.0.0.1" not in str(Config.DB_HOST):
+            try:
+                ssl_args = dict(conn_args)
+                ssl_args["ssl_disabled"] = False
+                ssl_args["ssl_verify_identity"] = False
+                return mysql.connector.connect(**ssl_args)
+            except Exception as ssl_err:
+                print(f"[WARN] SSL connection attempt failed ({ssl_err}), trying standard connection...")
 
         connection = mysql.connector.connect(**conn_args)
         return connection

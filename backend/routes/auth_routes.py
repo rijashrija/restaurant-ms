@@ -37,7 +37,7 @@ def auth_status():
         return success_response({"owner_exists": owner_exists}, 200)
     except Exception as e:
         print(f"[ERROR] auth_status: {e}")
-        return error_response("Failed to check auth status", 500)
+        return error_response(f"Failed to check auth status: {str(e)}", 500)
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
