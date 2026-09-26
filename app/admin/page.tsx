@@ -7,6 +7,7 @@ import {
   Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { QRCodeSVG } from "qrcode.react";
 import { getOrders, getOrderDetails, updateOrderStatus, getAllMenu, updateMenuAvailability, getTables, addTable, deleteTable, updateTableStatus, addMenuItem, updateMenuItem, exportOrderHistory, getRestaurantSettings, updateRestaurantSettings, RestaurantSettings, uploadLogo, getCategories, Category, addCategory, toggleCategory, updateCategory, transferTable, getDashboardStats, API_BASE_URL } from "../../services/api";
 import { getToken, getUser, clearToken, createManager, listManagers, updateManager, deleteManager, AuthUser } from "../../services/auth";
 import { Table } from "../../lib/types";
@@ -876,7 +877,7 @@ export default function AdminDashboard() {
                           <Tooltip 
                             cursor={{ stroke: '#f3f4f6', strokeWidth: 2 }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}
-                            formatter={(value: number) => [`₹${value.toFixed(2)}`, 'Sales']}
+                            formatter={(value: any) => [`₹${Number(value || 0).toFixed(2)}`, 'Sales']}
                           />
                           <Line type="monotone" dataKey="sales" stroke="#c2703e" strokeWidth={3} dot={{ fill: '#c2703e', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
                         </LineChart>
