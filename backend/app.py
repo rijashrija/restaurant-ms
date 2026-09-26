@@ -111,12 +111,18 @@ def create_app():
     app.config.from_object(Config)
 
     # ── Configure CORS ────────────────────────────────────────────────────
-    # origins: Only allow requests from our Next.js frontend.
-    # During development this is localhost:3000.
-    # In production you'd change this to your actual domain.
-    #
-    # supports_credentials: Allow cookies/auth headers (needed for sessions)
-    CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.1.29:3000"], supports_credentials=True)
+    # Allow local development origins and any deployed production frontend domain
+    import os
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.1.29:3000",
+    ]
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        allowed_origins.append(frontend_url)
+    
+    CORS(app, origins="*", supports_credentials=False)
 
     # ── Register Blueprints ───────────────────────────────────────────────
     # Each blueprint contains a group of related routes.
@@ -195,18 +201,10 @@ def create_app():
     return app
 
 
-# ── Start the Server ──────────────────────────────────────────────────────
-# This block only runs when you execute: python app.py
-# It does NOT run when another file imports app.py
-#
-# app.run() starts Flask's built-in development web server.
-# It listens for incoming HTTP requests on the specified host and port.
-#
-# host="0.0.0.0" → Accept connections from any network interface
-#                   (needed for mobile devices to connect in Phase 8)
-# debug=True     → Auto-restart when you save changes + show error details
+# Create module-level application instance for WSGI servers (gunicorn)
+app = create_app()
+
 if __name__ == "__main__":
-    app = create_app()
     print("\n=== Restaurant Management System - Flask Backend ===")
     print("=" * 50)
     print("[OK] Server starting at http://localhost:5000")
@@ -214,3 +212,4 @@ if __name__ == "__main__":
     print("=" * 50)
     print("Press CTRL+C to stop the server\n")
     app.run(host="0.0.0.0", port=5000, debug=Config.DEBUG)
+
