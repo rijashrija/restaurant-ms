@@ -87,17 +87,20 @@ def get_db_connection():
         Exception if the connection fails
     """
     try:
-        connection = mysql.connector.connect(
-            host=Config.DB_HOST,
-            port=Config.DB_PORT,
-            user=Config.DB_USER,
-            password=Config.DB_PASSWORD,
-            database=Config.DB_NAME,
-            # autocommit=False means we control when data is "saved"
-            # We call conn.commit() to save, or conn.rollback() to undo
-            # This is important for transactions (Phase 5)
-            autocommit=False,
-        )
+        conn_args = {
+            "host": Config.DB_HOST,
+            "port": Config.DB_PORT,
+            "user": Config.DB_USER,
+            "password": Config.DB_PASSWORD,
+            "database": Config.DB_NAME,
+            "autocommit": False,
+        }
+        # If connecting to remote cloud database (e.g. Aiven), configure SSL flexible validation
+        if "localhost" not in Config.DB_HOST and "127.0.0.1" not in Config.DB_HOST:
+            conn_args["ssl_disabled"] = False
+            conn_args["ssl_verify_identity"] = False
+
+        connection = mysql.connector.connect(**conn_args)
         return connection
     except Error as e:
         raise Exception(f"Cannot connect to MySQL: {e}")

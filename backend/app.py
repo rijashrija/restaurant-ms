@@ -146,6 +146,14 @@ def create_app():
     #
     # Example: {"status": "ok"} → sent as HTTP response with
     # Content-Type: application/json header
+    @app.route("/", methods=["GET"])
+    def root():
+        return jsonify({
+            "status": "ok",
+            "message": "Restaurant Management System API is live!",
+            "health_check": "/health"
+        }), 200
+
     @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify({
