@@ -61,11 +61,15 @@ export default function LoginPage() {
       .then(({ owner_exists }) => {
         setOwnerExists(owner_exists);
         if (!owner_exists) setMode("setup");
+        else setMode("login");
       })
       .catch((err) => {
         console.error("Auth status check failed:", err);
-        setError("Failed to connect to backend server.");
-        setOwnerExists(false);
+        // Default to login mode when backend is waking up (cold start).
+        // If owner truly doesn't exist, they can use the Owner Setup tab.
+        setOwnerExists(true);
+        setMode("login");
+        setError("Backend is starting up — please wait 30 seconds and try again.");
       });
   }, [router]);
 
