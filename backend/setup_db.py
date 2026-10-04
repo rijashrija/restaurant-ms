@@ -73,10 +73,10 @@ def run_setup():
     print("\n[2/5] Creating database...")
     try:
         cursor.execute(
-            "CREATE DATABASE IF NOT EXISTS restaurant_db "
+            f"CREATE DATABASE IF NOT EXISTS `{Config.DB_NAME}` "
             "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
-        cursor.execute("USE restaurant_db")
+        cursor.execute(f"USE `{Config.DB_NAME}`")
         print_step(f"Database '{Config.DB_NAME}' ready")
     except Error as e:
         print_step(f"Failed to create database: {e}", success=False)

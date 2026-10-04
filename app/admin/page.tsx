@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChefHat, ClipboardList, Utensils, LayoutDashboard, Home,
-  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid
+  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid, Menu, X
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { QRCodeSVG } from "qrcode.react";
@@ -18,6 +18,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("home");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Orders State
   const [orders, setOrders] = useState<any[]>([]);
@@ -718,16 +719,43 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="h-screen flex flex-col md:flex-row overflow-hidden" style={{ background: "#f5efe6" }}>
+    <div className="h-screen flex flex-col md:flex-row overflow-hidden relative" style={{ background: "#f5efe6" }}>
+
+      {/* ── Mobile Header ────────────────────────────────────────────────── */}
+      <div className="md:hidden flex items-center justify-between p-4 z-30 shadow-md shrink-0" style={{ background: "#1f170f", color: "#f0e6d8" }}>
+        <div className="flex items-center gap-2">
+          {restroSettings?.logo_url ? (
+            <img src={restroSettings.logo_url.startsWith('/') ? `${API_BASE_URL}${restroSettings.logo_url}` : restroSettings.logo_url} alt="Logo" className="w-8 h-8 object-contain rounded-md bg-white p-0.5" />
+          ) : (
+            <ChefHat className="w-6 h-6" style={{ color: "#c2703e" }} />
+          )}
+          <h2 className="text-lg font-bold truncate max-w-[200px]">{restroSettings?.restro_name || "Panel"}</h2>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-white/10 rounded-lg">
+          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
 
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <div
-        className="w-full md:w-64 text-white flex flex-col print:hidden overflow-y-auto z-20"
+        className={`${isMobileMenuOpen ? "flex absolute inset-0 z-40" : "hidden md:flex"} w-full md:w-64 text-white flex-col print:hidden overflow-y-auto md:relative shrink-0`}
         style={{ background: "linear-gradient(180deg, #2c2118 0%, #1f170f 100%)", borderRight: "1px solid #3d2e22", boxShadow: "4px 0 20px rgba(0,0,0,0.2)" }}
       >
+        {isMobileMenuOpen && (
+          <div className="md:hidden absolute top-4 right-4 z-50">
+            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 bg-white/10 rounded-lg text-white">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        )}
         <div className="p-6" style={{ borderBottom: "1px solid #3d2e22" }}>
           <div
-            onClick={() => currentUser?.role === "owner" && setActiveTab("settings")}
+            onClick={() => {
+              if (currentUser?.role === "owner") {
+                setActiveTab("settings");
+                setIsMobileMenuOpen(false);
+              }
+            }}
             className={`flex flex-col items-center mb-6 p-3 -mx-3 rounded-xl transition-colors ${currentUser?.role === "owner" ? "cursor-pointer" : ""}`}
             style={currentUser?.role === "owner" ? { cursor: "pointer" } : {}}
             onMouseEnter={e => { if (currentUser?.role === "owner") e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
@@ -767,7 +795,10 @@ export default function AdminDashboard() {
             hasPermission(id) && (
               <button
                 key={id}
-                onClick={() => setActiveTab(id as Tab)}
+                onClick={() => {
+                  setActiveTab(id as Tab);
+                  setIsMobileMenuOpen(false);
+                }}
                 className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200"
                 style={activeTab === id
                   ? { background: "#c2703e", color: "#fff", boxShadow: "0 4px 14px rgba(194,112,62,0.3)" }

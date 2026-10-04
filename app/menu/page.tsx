@@ -48,9 +48,9 @@ function MenuContent() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderConfirmed, setOrderConfirmed] = useState<{ id: number; total: number } | null>(null);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
 
   // ── 1. Initial Load: Verify Table & Fetch Menu ──────────────────────────
   useEffect(() => {
@@ -164,6 +164,7 @@ function MenuContent() {
       const respVat = respSubtotal * 0.13;
       setOrderConfirmed({ id: response.order_id, total: respSubtotal + respVat });
       setCart([]);
+      setIsMobileCartOpen(false);
     } catch (err: any) {
       setError(err.message || "Failed to place order.");
     } finally {
@@ -391,7 +392,7 @@ function MenuContent() {
   return (
     <div className="h-screen flex flex-col md:flex-row overflow-hidden" style={{ background: C.pageBg, color: C.text }}>
       {/* Left Side: Menu Section */}
-      <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+      <div className="flex-1 p-4 md:p-8 overflow-y-auto pb-28 md:pb-8">
         
         {/* Header */}
         <header className="mb-8 flex justify-between items-start">
@@ -518,34 +519,135 @@ function MenuContent() {
         </div>
       </div>
 
-      {/* Mobile Floating Cart Button */}
-      {cart.length > 0 && (
-        <div className="fixed bottom-6 left-0 right-0 z-50 md:hidden flex justify-center px-4 animate-fade-in-up pointer-events-none">
-          <button
-            onClick={() => {
-              window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-            }}
-            className="pointer-events-auto w-full max-w-sm rounded-2xl p-4 shadow-2xl flex justify-between items-center active:scale-[0.98] transition-all"
-            style={{ background: C.cartBarBg, color: "#f0e6d8", border: "1px solid rgba(255,255,255,0.08)" }}
+      {/* ── Mobile: Sticky Cart Bar + Slide-up Drawer ─────────────────── */}
+      <div className="md:hidden">
+        {/* Sticky bottom bar — always visible when cart has items */}
+        {cart.length > 0 && (
+          <div
+            className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pt-2 pointer-events-none"
+            style={{ background: "linear-gradient(to top, rgba(28,23,18,0.95) 60%, transparent)" }}
           >
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(194,112,62,0.2)" }}>
-                  <ShoppingCart className="w-5 h-5" style={{ color: "#c2703e" }} />
+            <button
+              onClick={() => setIsMobileCartOpen(true)}
+              className="pointer-events-auto w-full rounded-2xl p-4 shadow-2xl flex justify-between items-center active:scale-[0.98] transition-all"
+              style={{ background: C.cartBarBg, color: "#f0e6d8", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(194,112,62,0.2)" }}>
+                    <ShoppingCart className="w-5 h-5" style={{ color: "#c2703e" }} />
+                  </div>
+                  <span
+                    className="absolute -top-1 -right-1 text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full"
+                    style={{ background: C.primary, color: "#fff", border: `2px solid ${C.cartBarBg}` }}
+                  >
+                    {cart.reduce((total, item) => total + item.quantity, 0)}
+                  </span>
                 </div>
-                <span
-                  className="absolute -top-1 -right-1 text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full"
-                  style={{ background: C.primary, color: "#fff", border: `2px solid ${C.cartBarBg}` }}
-                >
-                  {cart.reduce((total, item) => total + item.quantity, 0)}
-                </span>
+                <span className="font-bold text-sm tracking-wide uppercase" style={{ color: "#d4c4a8" }}>View Cart</span>
               </div>
-              <span className="font-bold text-sm tracking-wide uppercase" style={{ color: "#d4c4a8" }}>View Cart</span>
+              <span className="font-bold text-lg" style={{ color: "#f0e6d8" }}>Rs. {grandTotal.toFixed(2)}</span>
+            </button>
+          </div>
+        )}
+
+        {/* Slide-up Drawer Overlay */}
+        {isMobileCartOpen && (
+          <div
+            className="fixed inset-0 z-50 flex flex-col justify-end"
+            style={{ background: "rgba(0,0,0,0.5)" }}
+            onClick={() => setIsMobileCartOpen(false)}
+          >
+            <div
+              className="rounded-t-3xl flex flex-col max-h-[85vh]"
+              style={{ background: C.sidebarBg }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Drawer handle + header */}
+              <div className="p-5 flex items-center justify-between" style={{ borderBottom: `1px solid ${C.sidebarBorder}` }}>
+                <div className="w-10 h-1 rounded-full mx-auto absolute left-1/2 -translate-x-1/2 top-3" style={{ background: C.cardBorder }} />
+                <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: C.text }}>
+                  <ShoppingCart className="w-5 h-5" /> Your Cart
+                </h2>
+                <button
+                  onClick={() => setIsMobileCartOpen(false)}
+                  className="p-2 rounded-lg"
+                  style={{ background: "#f0ebe4", color: C.muted }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Cart Items (scrollable) */}
+              <div className="flex-1 overflow-y-auto p-5" style={{ background: "#faf6f2" }}>
+                {cart.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-3 py-12" style={{ color: C.muted }}>
+                    <ShoppingCart className="w-14 h-14 opacity-20" />
+                    <p>Your cart is empty</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cart.map((item) => (
+                      <div key={item.id} className="p-4 rounded-xl shadow-sm" style={{ background: C.cardBg, border: `1px solid ${C.cardBorder}` }}>
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="font-medium" style={{ color: C.text }}>{item.name}</h4>
+                          <span className="font-semibold" style={{ color: C.muted }}>Rs. {item.price * item.quantity}</span>
+                        </div>
+                        <div className="flex items-center">
+                          <div className="flex items-center rounded-lg p-1" style={{ background: "#f0ebe4" }}>
+                            <button
+                              onClick={() => { if (item.quantity === 1) removeFromCart(item.id); else updateQuantity(item.id, -1); }}
+                              className="w-8 h-8 flex items-center justify-center rounded shadow-sm"
+                              style={{ background: "#fff", color: C.muted }}
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <span className="w-10 text-center font-medium" style={{ color: C.text }}>{item.quantity}</span>
+                            <button
+                              onClick={() => updateQuantity(item.id, 1)}
+                              className="w-8 h-8 flex items-center justify-center rounded shadow-sm"
+                              style={{ background: "#fff", color: C.muted }}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Totals + Place Order */}
+              <div className="p-5" style={{ borderTop: `1px solid ${C.sidebarBorder}`, background: C.sidebarBg }}>
+                {error && <p className="text-red-500 text-sm mb-3 text-center">{error}</p>}
+                <div className="space-y-2 mb-4">
+                  <div className="flex justify-between text-sm" style={{ color: C.muted }}>
+                    <span>Subtotal</span>
+                    <span className="font-medium">Rs. {cartSubtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm pb-2" style={{ color: C.muted, borderBottom: `1px dashed ${C.cardBorder}` }}>
+                    <span>VAT (13%)</span>
+                    <span className="font-medium">Rs. {vatAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between pt-2">
+                    <span className="font-bold" style={{ color: C.text }}>Grand Total</span>
+                    <span className="text-2xl font-bold" style={{ color: C.primary }}>Rs. {grandTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handlePlaceOrder}
+                  disabled={cart.length === 0 || isPlacingOrder}
+                  className="w-full py-4 rounded-xl font-bold text-lg transition-all active:scale-95"
+                  style={cart.length === 0 ? { background: "#e8ddd2", color: C.muted, cursor: "not-allowed" } : { background: C.olive, color: "#fff" }}
+                >
+                  {isPlacingOrder ? "Placing Order..." : "Place Order"}
+                </button>
+              </div>
             </div>
-            <span className="font-bold text-lg" style={{ color: "#f0e6d8" }}>Rs. {grandTotal.toFixed(2)}</span>
-          </button>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {/* Right Side: Cart Section — fixed height column on desktop */}
       <div
