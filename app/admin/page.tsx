@@ -1146,14 +1146,13 @@ export default function AdminDashboard() {
             };
 
             return (
-              <div className="flex gap-0 w-full flex-1" style={{ minHeight: 0, height: 0 }}>
+              <div className="flex flex-col md:flex-row gap-0 w-full flex-1" style={{ minHeight: 0, height: 0 }}>
 
                 {/* Left: Category sidebar */}
                 <div
-                  className="flex flex-col shrink-0 overflow-hidden self-stretch"
+                  className="flex flex-col shrink-0 overflow-hidden w-full md:w-[230px] h-[35%] md:h-full border-b md:border-b-0 border-r-0 md:border-r"
                   style={{
-                    width: 230,
-                    borderRight: "1px solid #e8ddd2",
+                    borderColor: "#e8ddd2",
                     background: "#faf6f2",
                   }}
                 >
@@ -1289,7 +1288,7 @@ export default function AdminDashboard() {
 
                   {/* Top toolbar */}
                   <div
-                    className="flex items-center justify-between px-6 py-4 shrink-0"
+                    className="flex flex-wrap items-center justify-between gap-4 px-4 md:px-6 py-4 shrink-0"
                     style={{ borderBottom: "1px solid #e8ddd2", background: "#fff" }}
                   >
                     <div>

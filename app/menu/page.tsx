@@ -395,9 +395,9 @@ function MenuContent() {
       <div className="flex-1 p-4 md:p-8 overflow-y-auto pb-28 md:pb-8">
         
         {/* Header */}
-        <header className="mb-8 flex justify-between items-start">
+        <header className="mb-8 flex flex-col md:flex-row justify-between items-start gap-6 md:gap-0">
           {/* Left: Greetings & Table Info */}
-          <div>
+          <div className="w-full md:w-auto">
             <h1 className="text-3xl font-bold mb-2" style={{ color: C.text }}>
               {(() => {
                 const hour = new Date().getHours();
@@ -419,23 +419,23 @@ function MenuContent() {
           </div>
           
           {/* Right: Restaurant Branding */}
-          <div className="flex items-center gap-3 text-right">
-            <div>
-              <h2 className="text-xl font-bold flex items-center gap-2 justify-end">
-                {branding?.restro_name || "My Restaurant"}
-              </h2>
-              {branding?.tagline && <p className="text-xs" style={{ color: C.muted }}>{branding.tagline}</p>}
-            </div>
+          <div className="flex items-center gap-3 w-full md:w-auto justify-start md:justify-end text-left md:text-right">
             {branding?.logo_url ? (
               <img
                 src={branding.logo_url.startsWith('/') ? `${API_BASE_URL}${branding.logo_url}` : branding.logo_url}
                 alt="Logo"
-                className="w-12 h-12 object-contain rounded-xl"
+                className="w-12 h-12 object-contain rounded-xl shrink-0 md:order-last"
                 style={{ border: `1px solid ${C.cardBorder}`, background: "#fff" }}
               />
             ) : (
-              <ChefHat className="w-10 h-10" style={{ color: C.primary }} />
+              <ChefHat className="w-10 h-10 shrink-0 md:order-last" style={{ color: C.primary }} />
             )}
+            <div className="md:order-first">
+              <h2 className="text-xl font-bold flex items-center gap-2 md:justify-end">
+                {branding?.restro_name || "My Restaurant"}
+              </h2>
+              {branding?.tagline && <p className="text-xs" style={{ color: C.muted }}>{branding.tagline}</p>}
+            </div>
           </div>
         </header>
         
@@ -445,20 +445,25 @@ function MenuContent() {
           style={{
             background: "rgba(245,239,230,0.88)",
             backdropFilter: "blur(16px)",
+            WebkitBackdropFilter: "blur(16px)",
             borderBottom: `1px solid ${C.cardBorder}`,
           }}
         >
-          <div className="flex overflow-x-auto gap-3 pb-1 no-scrollbar">
+          <div 
+            className="flex overflow-x-auto gap-3 pb-2 -mb-2 no-scrollbar" 
+            style={{ scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}
+          >
             {["All", ...categories.map(c => c.name)].map(category => (
               <button
                 key={category}
                 onClick={() => setActiveCategory(category)}
-                className="px-5 py-2.5 rounded-full whitespace-nowrap font-semibold transition-all active:scale-95"
-                style={
-                  activeCategory === category
+                className="px-5 py-2.5 rounded-full whitespace-nowrap font-semibold transition-all active:scale-95 shrink-0"
+                style={{
+                  scrollSnapAlign: "start",
+                  ...(activeCategory === category
                     ? { background: C.categoryActive, color: "#f0e6d8", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", transform: "translateY(-1px)" }
-                    : { background: "#fff", color: C.muted, border: `1px solid ${C.cardBorder}` }
-                }
+                    : { background: "#fff", color: C.muted, border: `1px solid ${C.cardBorder}` })
+                }}
               >
                 {category}
               </button>
