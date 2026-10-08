@@ -905,7 +905,7 @@ export default function AdminDashboard() {
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} dy={10} />
                           <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} tickFormatter={(val: any) => `₹${val}`} />
-                          <Tooltip 
+                          <Tooltip
                             cursor={{ stroke: '#f3f4f6', strokeWidth: 2 }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}
                             // @ts-ignore
@@ -1274,12 +1274,7 @@ export default function AdminDashboard() {
                       );
                     })}
 
-                    {/* Orphans indicator */}
-                    {orphans.length > 0 && (
-                      <div className="mx-3 mt-3 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: "#f5ebe4", color: "#8b5e3c", border: "1px solid #d4a882" }}>
-                        &#9888; {orphans.length} uncategorized item{orphans.length > 1 ? "s" : ""}
-                      </div>
-                    )}
+
                   </div>
                 </div>
 
@@ -1465,33 +1460,7 @@ export default function AdminDashboard() {
                       </div>
                     )}
 
-                    {orphans.length > 0 && (
-                      <div className="mt-8 rounded-xl p-4" style={{ background: "#f5ebe4", border: "1px solid #d4a882" }}>
-                        <h3 className="font-bold text-sm mb-3 flex items-center gap-2" style={{ color: "#6b3d1e" }}>
-                          Uncategorized ({orphans.length})
-                          <span className="text-xs font-normal" style={{ color: "#9a6845" }}>Drag these into a category on the left</span>
-                        </h3>
-                        <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px,1fr))" }}>
-                          {orphans.map(item => (
-                            <div
-                              key={item.id}
-                              draggable
-                              onDragStart={e => handleDragStart(e, item)}
-                              className="bg-white rounded-lg p-3 flex items-center justify-between cursor-grab transition-colors"
-                              style={{ border: "1px solid #d4a882" }}
-                              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.borderColor = "#c2703e")}
-                              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.borderColor = "#d4a882")}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <GripVertical className="w-3.5 h-3.5 shrink-0" style={{ color: "#c4956a" }} />
-                                <span className="text-sm font-semibold text-gray-900 truncate">{item.name}</span>
-                              </div>
-                              <span className="text-xs font-bold shrink-0 ml-2" style={{ color: "#8b5e3c" }}>Rs.{item.price}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+
                   </div>
                 </div>
               </div>
@@ -1691,7 +1660,7 @@ export default function AdminDashboard() {
                     <PlusCircle className="w-5 h-5" style={{ color: "#c2703e" }} /> Add New Table
                   </h3>
                   <p className="text-sm text-gray-500 mb-6">Create a new table and generate its QR code.</p>
-                  
+
                   <form onSubmit={handleAddTable} className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -1727,7 +1696,7 @@ export default function AdminDashboard() {
                     <h3 className="font-bold text-lg text-gray-900">Table Info</h3>
                   </div>
                   <p className="text-sm text-gray-500 mb-6">Real-time status of your dining floor.</p>
-                  
+
                   <hr className="border-gray-100 mb-6" />
 
                   <div className="flex gap-4">
@@ -2045,7 +2014,7 @@ export default function AdminDashboard() {
               Payment Not Confirmed
             </h3>
             <p className="text-sm text-gray-600 text-center mb-6">
-              Table <strong>{unpaidWarning.tableNumber}</strong> may still have an unpaid bill. 
+              Table <strong>{unpaidWarning.tableNumber}</strong> may still have an unpaid bill.
               Are you sure you want to mark it as <strong>Available</strong>?
             </p>
             <div className="flex gap-3">
