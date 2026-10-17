@@ -25,6 +25,10 @@ export interface Order {
   table_number: number;
   status: 'new' | 'preparing' | 'ready' | 'completed' | 'cancelled';
   created_at: string;
+  placed_by_username?: string | null;
+  order_count?: number;
+  total_price?: number;
+  servers_list?: string | null;
 }
 
 export interface OrderDetailItem {
@@ -33,9 +37,31 @@ export interface OrderDetailItem {
   quantity: number;
   price: number;
   item_name: string;
+  round_number?: number;
+  item_created_at?: string;
+  total?: number;
+  served_by_user_id?: number | null;
+  served_by_username?: string | null;
+}
+
+export interface OrderRound {
+  round_number: number;
+  ordered_at: string;
+  items: OrderDetailItem[];
+  subtotal: number;
+  served_by_username?: string | null;
+  served_by_usernames?: string[];
 }
 
 export interface OrderDetails extends Order {
   total_price: number;
+  order_count: number;
+  rounds: OrderRound[];
   items: OrderDetailItem[];
+}
+
+export interface StaffUser {
+  id: number;
+  username: string;
+  role: string;
 }

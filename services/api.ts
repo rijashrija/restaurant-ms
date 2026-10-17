@@ -153,10 +153,43 @@ export async function getMenu(category?: string): Promise<MenuItem[]> {
   return data.items;
 }
 
+export interface PlaceOrderResponse {
+  message: string;
+  order_id: number;
+  round_price: number;
+  total_price: number;
+  order_count: number;
+  current_round: number;
+  rounds: {
+    round_number: number;
+    ordered_at: string;
+    served_by_username?: string | null;
+    served_by_usernames?: string[];
+    items: {
+      id: number;
+      menu_item_id: number;
+      item_name: string;
+      quantity: number;
+      price: number;
+      total: number;
+      served_by_user_id?: number | null;
+      served_by_username?: string | null;
+    }[];
+    subtotal: number;
+  }[];
+  status: string;
+  merged: boolean;
+}
+
 /**
  * Places a new order by sending the cart data to Flask.
  */
-export async function placeOrder(tableId: number, cart: { menu_item_id: number; quantity: number }[], token?: string) {
+export async function placeOrder(
+  tableId: number,
+  cart: { menu_item_id: number; quantity: number; served_by_user_id?: number }[],
+  token?: string,
+  servedByUserId?: number
+): Promise<PlaceOrderResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -164,13 +197,18 @@ export async function placeOrder(tableId: number, cart: { menu_item_id: number; 
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  const payload: any = {
+    table_id: tableId,
+    items: cart,
+  };
+  if (servedByUserId) {
+    payload.served_by_user_id = servedByUserId;
+  }
+
   const res = await fetch(`${API_BASE_URL}/api/orders`, {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      table_id: tableId,
-      items: cart,
-    }),
+    body: JSON.stringify(payload),
   });
   
   if (!res.ok) {
@@ -180,6 +218,76 @@ export async function placeOrder(tableId: number, cart: { menu_item_id: number; 
   
   return res.json();
 }
+
+/**
+ * Fetches all staff users for server selection / attribution.
+ */
+export async function getStaffList(): Promise<{ id: number; username: string; role: string }[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/staff-list`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.staff || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetches current active order & rounds history for a table (customer view).
+ */
+export async function getActiveOrderByTable(tableId: number): Promise<{ has_active_order: boolean; order: any | null }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/orders/active-by-table/${tableId}`);
+    if (!res.ok) return { has_active_order: false, order: null };
+    return res.json();
+  } catch {
+    return { has_active_order: false, order: null };
+  }
+}
+
+/**
+ * Updates the quantity of an item in an active order (Customer/Staff).
+ */
+export async function updateOrderItemQuantity(
+  orderId: number,
+  itemId: number,
+  quantity: number
+): Promise<{ message: string; order?: any; order_cancelled?: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/orders/${orderId}/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to update item quantity");
+  }
+
+  return res.json();
+}
+
+/**
+ * Deletes an item from an active order (Customer/Staff).
+ */
+export async function deleteOrderItem(
+  orderId: number,
+  itemId: number
+): Promise<{ message: string; order?: any; order_cancelled?: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/orders/${orderId}/items/${itemId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to delete item from order");
+  }
+
+  return res.json();
+}
+
 
 /**
  * Downloads the full order history as a CSV file (Owner only).

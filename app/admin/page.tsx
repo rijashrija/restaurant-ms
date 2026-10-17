@@ -1108,18 +1108,32 @@ export default function AdminDashboard() {
                     >
                       <div className="flex justify-between items-start mb-2">
                         <div>
-                          <span className="font-bold text-lg">Order #{order.id}</span>
-                          <span className="ml-3 text-sm font-medium text-gray-800">Table {order.table_number}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-lg">Order #{order.id}</span>
+                            <span className="text-sm font-medium text-gray-800">Table {order.table_number}</span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-xs">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              Ordered {order.order_count || 1} time{(order.order_count || 1) > 1 ? "s" : ""}
+                            </span>
+                          </div>
                         </div>
                         <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.status)} uppercase`}>
                           {order.status}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-700 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {new Date(order.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}, {new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        {order.placed_by_username && (
-                          <span className="ml-2 bg-blue-100 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">by {order.placed_by_username}</span>
+                      <div className="text-xs text-gray-700 flex items-center justify-between flex-wrap gap-2 mt-1">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-gray-500" />
+                          {new Date(order.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}, {new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {order.placed_by_username && (
+                            <span className="ml-2 bg-blue-100 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">by {order.placed_by_username}</span>
+                          )}
+                        </div>
+                        {order.servers_list && (
+                          <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                            <span>👤 Servers:</span>
+                            <span className="font-bold">{order.servers_list}</span>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1956,15 +1970,107 @@ export default function AdminDashboard() {
                   </span>
                 </div>
               </div>
-              <h3 className="font-bold text-gray-900 mb-4 uppercase tracking-wider text-sm border-b pb-2">Items</h3>
-              <div className="space-y-4 mb-8">
-                {selectedOrder.items?.map((item: any) => (
-                  <div key={item.id} className="flex justify-between">
-                    <span><span className="font-semibold">{item.quantity}x</span> {item.item_name}</span>
-                    <span className="font-medium">Rs. {item.price * item.quantity}</span>
-                  </div>
-                ))}
+              {/* Customer Order Count Highlight Card */}
+              <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-between shadow-xs">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-800">Customer Orders Placed</p>
+                  <p className="text-2xl font-black text-amber-950 mt-0.5">
+                    {selectedOrder.order_count || 1} {selectedOrder.order_count === 1 ? "Time" : "Times"}
+                  </p>
+                  <p className="text-[11px] text-amber-700 font-medium mt-0.5">
+                    {selectedOrder.order_count > 1 ? "Customer placed multiple food orders" : "First order placed"}
+                  </p>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-white border border-amber-300 flex items-center justify-center text-amber-700 shadow-xs">
+                  <Clock className="w-6 h-6 text-amber-600" />
+                </div>
               </div>
+
+              {/* Items grouped by Order Round with Timestamps */}
+              <div className="flex items-center justify-between border-b pb-2 mb-4">
+                <h3 className="font-bold text-gray-900 uppercase tracking-wider text-xs">
+                  Items by Order Round ({selectedOrder.order_count || 1})
+                </h3>
+                <span className="text-[11px] text-gray-500 font-medium">Order times</span>
+              </div>
+
+              {selectedOrder.rounds && selectedOrder.rounds.length > 0 ? (
+                <div className="space-y-4 mb-8">
+                  {selectedOrder.rounds.map((rnd: any) => (
+                    <div key={rnd.round_number} className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+                      {/* Round Header */}
+                      <div className="bg-gray-50/90 px-3.5 py-2.5 border-b border-gray-200 flex justify-between items-center">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-xs uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-900 text-xs flex items-center justify-center font-bold">
+                              {rnd.round_number}
+                            </span>
+                            Order #{rnd.round_number}
+                          </span>
+                          {rnd.served_by_username && (
+                            <span className="text-[10px] font-semibold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-300">
+                              👤 Server: {rnd.served_by_username}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 flex items-center gap-1 bg-white px-2.5 py-1 rounded-md border border-gray-200 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          {rnd.ordered_at ? new Date(rnd.ordered_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }) : "N/A"}
+                        </span>
+                      </div>
+
+                      {/* Items in this round */}
+                      <div className="p-3.5 space-y-2.5 divide-y divide-gray-100">
+                        {rnd.items?.map((item: any) => (
+                          <div key={item.id} className="pt-2 first:pt-0 flex justify-between items-start text-sm">
+                            <div className="flex flex-col">
+                              <span className="text-gray-800">
+                                <span className="font-bold text-gray-900">{item.quantity}x</span> {item.item_name}
+                              </span>
+                              {item.served_by_username ? (
+                                <span className="text-[11px] font-medium text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 w-fit mt-1 flex items-center gap-1">
+                                  <span>👤 Served by:</span>
+                                  <strong className="font-bold">{item.served_by_username}</strong>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-gray-500 mt-0.5">
+                                  📱 Customer self-order
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-semibold text-gray-800">Rs. {(item.price * item.quantity).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Round Subtotal */}
+                      <div className="bg-gray-50/60 px-3.5 py-1.5 border-t border-dashed border-gray-200 text-right text-xs text-gray-600 font-semibold">
+                        Round subtotal: Rs. {(rnd.subtotal || 0).toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-4 mb-8">
+                  {selectedOrder.items?.map((item: any) => (
+                    <div key={item.id} className="flex justify-between items-start">
+                      <div className="flex flex-col">
+                        <span><span className="font-semibold">{item.quantity}x</span> {item.item_name}</span>
+                        {item.served_by_username ? (
+                          <span className="text-[10px] font-medium text-amber-900">
+                            👤 Served by: <strong>{item.served_by_username}</strong>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-500">
+                            📱 Customer self-order
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-medium">Rs. {(item.price * item.quantity).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="space-y-2 py-4 border-t border-b border-dashed border-gray-200 mb-8">
                 <div className="flex justify-between text-sm text-gray-800">
                   <span>Subtotal</span>

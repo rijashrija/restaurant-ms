@@ -423,3 +423,25 @@ def delete_manager(manager_id):
         if cursor: cursor.close()
         if conn: conn.close()
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# GET /api/auth/staff-list
+# Returns list of staff members for order attribution
+# ══════════════════════════════════════════════════════════════════════════
+@auth_bp.route("/api/auth/staff-list", methods=["GET"])
+def get_staff_list():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, username, role FROM users ORDER BY username ASC")
+        staff = cursor.fetchall()
+        return success_response({"staff": staff}, 200)
+    except Exception as e:
+        print(f"[ERROR] get_staff_list: {e}")
+        return error_response("Failed to fetch staff list", 500)
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+

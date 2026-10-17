@@ -276,6 +276,15 @@ CREATE TABLE IF NOT EXISTS order_items (
     -- NOT the current price from menu_items
     price           DECIMAL(10, 2) NOT NULL,
 
+    -- Order round/batch number (1 for first order, 2 for second time ordered, etc.)
+    round_number    INT NOT NULL DEFAULT 1,
+
+    -- Staff member who served/placed this item (NULL if self-ordered by customer)
+    served_by_user_id INT NULL,
+
+    -- Time this specific round/item was placed
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
     -- ── FOREIGN KEY: order_id → orders.id ───────────────────
     -- If we delete an order, delete its items too (CASCADE)
     CONSTRAINT fk_order_items_order
@@ -290,6 +299,12 @@ CREATE TABLE IF NOT EXISTS order_items (
         FOREIGN KEY (menu_item_id)
         REFERENCES menu_items(id)
         ON DELETE RESTRICT,
+
+    -- ── FOREIGN KEY: served_by_user_id → users.id ───────────
+    CONSTRAINT fk_order_items_served_by
+        FOREIGN KEY (served_by_user_id)
+        REFERENCES users(id)
+        ON DELETE SET NULL,
 
     -- ── CHECK CONSTRAINT ──────────────────────────────────────
     -- Enforces business rules at the database level
