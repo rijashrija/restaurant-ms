@@ -308,6 +308,21 @@ def create_order():
         rounds_list = list(rounds_dict.values())
         order_count = len(rounds_list) if rounds_list else current_round
 
+        # If an existing order was merged and placed by customer, notify staff
+        if is_merged and not served_by_user_id:
+            try:
+                cursor.execute("SELECT table_number FROM restaurant_tables WHERE id = %s", (table_id,))
+                t_row = cursor.fetchone()
+                t_num = t_row["table_number"] if t_row else table_id
+                notif_msg = f"Table {t_num}: Customer added {len(items)} items (Round #{order_count})"
+                cursor.execute(
+                    "INSERT INTO order_notifications (order_id, table_id, table_number, change_type, message) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (order_id, table_id, t_num, "round_added", notif_msg)
+                )
+            except Exception as ne:
+                print(f"[WARN] Failed to insert round_added notification: {ne}")
+
         # ── 7. Commit ──────────────────────────────────────────────────────
         conn.commit()
 
@@ -398,6 +413,13 @@ def get_orders():
                 order["created_at"] = local_iso(order["created_at"])
             order["total_price"] = float(order.get("total_price") or 0.0)
             order["order_count"] = max(int(order.get("order_count") or 1), 1)
+
+            # Ensure all distinct servers including placed_by_username are represented
+            s_list = [s.strip() for s in (order.get("servers_list") or "").split(",") if s.strip()]
+            if order.get("placed_by_username") and order["placed_by_username"] not in s_list:
+                s_list.insert(0, order["placed_by_username"])
+            order["servers_list"] = ", ".join(s_list) if s_list else None
+            order["all_staff"] = s_list
 
         return success_response({"orders": orders, "count": len(orders)}, 200)
 
@@ -521,6 +543,18 @@ def get_order_details(order_id):
         order["order_count"] = len(rounds_list) if rounds_list else 1
         order["total_price"] = total_price
 
+        # Collect all unique staff/servers across order & rounds
+        all_servers = []
+        if order.get("placed_by_username") and order["placed_by_username"] not in all_servers:
+            all_servers.append(order["placed_by_username"])
+        for item in items:
+            s_name = item.get("served_by_username")
+            if s_name and s_name not in all_servers:
+                all_servers.append(s_name)
+
+        order["servers_list"] = ", ".join(all_servers) if all_servers else None
+        order["all_staff"] = all_servers
+
         return success_response(order, 200)
 
     except Exception as e:
@@ -640,60 +674,111 @@ def export_orders():
         )
         orders = cursor.fetchall()
 
-        # Build CSV data in memory
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # Header row optimized for Excel Pivot Tables
-        writer.writerow(["Order ID", "Date", "Time", "Table", "Status", "Item Name", "Quantity", "Unit Price (Rs)", "Line Subtotal (Rs)", "VAT 13% (Rs)", "Line Grand Total (Rs)"])
+        # Build CSV lines in memory
+        def _escape_csv(val: str) -> str:
+            val_str = str(val) if val is not None else ""
+            if "," in val_str or '"' in val_str or "\n" in val_str or "\r" in val_str:
+                return '"' + val_str.replace('"', '""') + '"'
+            return val_str
+
+        headers = [
+            "Order ID", "Date", "Time", "Table", "Round", "Status",
+            "Item Name", "Quantity", "Unit Price (Rs)", "Line Subtotal (Rs)",
+            "VAT 13% (Rs)", "Line Grand Total (Rs)"
+        ]
+        lines = [",".join([_escape_csv(h) for h in headers])]
 
         for order in orders:
             order_id = order["id"]
             
-            # Date/Time formatting
-            dt = order["created_at"]
-            date_str = dt.strftime("%Y-%m-%d") if dt else ""
-            time_str = dt.strftime("%H:%M:%S") if dt else ""
+            # Fallback date/time from order
+            order_dt = order["created_at"]
+            if order_dt:
+                if order_dt.tzinfo is None:
+                    order_dt = order_dt.astimezone()
+                order_date_str = f'="{order_dt.strftime("%Y-%m-%d")}"'
+                order_time_str = f'="{order_dt.strftime("%I:%M:%S %p")}"'
+            else:
+                order_date_str = ""
+                order_time_str = ""
             
-            # Fetch items for this order
+            # Fetch items for this order including individual item order timestamps and round numbers
             cursor.execute(
-                "SELECT oi.quantity, oi.price, m.name "
+                "SELECT oi.quantity, oi.price, oi.round_number, "
+                "COALESCE(oi.created_at, o.created_at) AS item_created_at, m.name "
                 "FROM order_items oi "
                 "JOIN menu_items m ON oi.menu_item_id = m.id "
-                "WHERE oi.order_id = %s",
+                "JOIN orders o ON oi.order_id = o.id "
+                "WHERE oi.order_id = %s "
+                "ORDER BY oi.id ASC",
                 (order_id,)
             )
             items = cursor.fetchall()
             
             # If an order has no items (shouldn't happen), write an empty row for it
             if not items:
-                writer.writerow([order_id, date_str, time_str, f"Table {order['table_number']}", order["status"].upper(), "", 0, 0, 0, 0, 0])
+                lines.append(",".join([
+                    str(order_id),
+                    order_date_str,
+                    order_time_str,
+                    _escape_csv(f"Table {order['table_number']}"),
+                    "Round 1",
+                    _escape_csv(order["status"].upper()),
+                    "", "0", "0.00", "0.00", "0.00", "0.00"
+                ]))
                 continue
 
-            # Write ONE ROW PER ITEM. This makes data analysis in Excel much easier!
+            # Write ONE ROW PER ITEM with the EXACT date and time that item was ordered
             for item in items:
+                raw_item_dt = item.get("item_created_at")
+                order_base_dt = order.get("created_at")
+
+                # Guard against backfilled timestamps: when the order_items.created_at column
+                # was added to the database with DEFAULT CURRENT_TIMESTAMP, all pre-existing
+                # rows received the column-addition date/time (e.g. 2026-10-17) instead of
+                # their real order date. We detect this by comparing dates: if the item's date
+                # doesn't match the order's date, the item timestamp is unreliable — fall back
+                # to the order's created_at which is always accurate.
+                if raw_item_dt and order_base_dt:
+                    if raw_item_dt.date() != order_base_dt.date():
+                        raw_item_dt = order_base_dt  # backfilled — use the reliable order date
+
+                item_dt = raw_item_dt or order_base_dt
+                if item_dt:
+                    if item_dt.tzinfo is None:
+                        item_dt = item_dt.astimezone()
+                    item_date_str = f'="{item_dt.strftime("%Y-%m-%d")}"'
+                    item_time_str = f'="{item_dt.strftime("%I:%M:%S %p")}"'
+                else:
+                    item_date_str = ""
+                    item_time_str = ""
+
+                round_num = item.get("round_number") or 1
                 qty = int(item["quantity"])
                 unit_price = float(item["price"])
                 line_subtotal = qty * unit_price
                 vat_amount = line_subtotal * 0.13
                 line_grand_total = line_subtotal + vat_amount
                 
-                writer.writerow([
-                    order_id,
-                    date_str,
-                    time_str,
-                    f"Table {order['table_number']}",
-                    order["status"].upper(),
-                    item["name"],
-                    qty,
+                lines.append(",".join([
+                    str(order_id),
+                    item_date_str,
+                    item_time_str,
+                    _escape_csv(f"Table {order['table_number']}"),
+                    f"Round {round_num}",
+                    _escape_csv(order["status"].upper()),
+                    _escape_csv(item["name"]),
+                    str(qty),
                     f"{unit_price:.2f}",
                     f"{line_subtotal:.2f}",
                     f"{vat_amount:.2f}",
                     f"{line_grand_total:.2f}"
-                ])
+                ]))
 
-        # Generate response as CSV file download
-        response = Response(output.getvalue(), mimetype="text/csv")
+        # Generate response as CSV file download with UTF-8 BOM (\ufeff)
+        # and CRLF line endings so Microsoft Excel opens it seamlessly without formatting artifacts.
+        csv_content = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        response = Response(csv_content, mimetype="text/csv")
         response.headers["Content-Disposition"] = "attachment; filename=restaurant_order_history.csv"
         return response
 
@@ -832,9 +917,10 @@ def fetch_order_with_rounds(cursor, order_id):
     """
     cursor.execute(
         "SELECT o.id, o.table_id, o.status, o.created_at, "
-        "t.table_number "
+        "t.table_number, u.username as placed_by_username "
         "FROM orders o "
         "JOIN restaurant_tables t ON o.table_id = t.id "
+        "LEFT JOIN users u ON o.placed_by_user_id = u.id "
         "WHERE o.id = %s",
         (order_id,)
     )
@@ -918,6 +1004,19 @@ def fetch_order_with_rounds(cursor, order_id):
     order["rounds"] = rounds_list
     order["order_count"] = len(rounds_list) if rounds_list else 1
     order["total_price"] = total_price
+
+    # Collect all unique staff/servers across order & rounds
+    all_servers = []
+    if order.get("placed_by_username") and order["placed_by_username"] not in all_servers:
+        all_servers.append(order["placed_by_username"])
+    for item in items:
+        s_name = item.get("served_by_username")
+        if s_name and s_name not in all_servers:
+            all_servers.append(s_name)
+
+    order["servers_list"] = ", ".join(all_servers) if all_servers else None
+    order["all_staff"] = all_servers
+
     return order
 
 
@@ -956,13 +1055,36 @@ def update_order_item_quantity(order_id, item_id):
         if order["status"] in ("completed", "cancelled"):
             return error_response(f"Cannot edit items in an order that is {order['status']}", 400)
 
-        # 2. Verify item exists in this order
-        cursor.execute("SELECT id, order_id, quantity, price FROM order_items WHERE id = %s AND order_id = %s", (item_id, order_id))
+        # 2. Verify item exists in this order (fetch name and old quantity)
+        cursor.execute(
+            "SELECT oi.id, oi.order_id, oi.quantity, oi.price, m.name AS item_name "
+            "FROM order_items oi "
+            "LEFT JOIN menu_items m ON oi.menu_item_id = m.id "
+            "WHERE oi.id = %s AND oi.order_id = %s",
+            (item_id, order_id)
+        )
         item = cursor.fetchone()
         if not item:
             return error_response(f"Item #{item_id} not found in Order #{order_id}", 404)
 
         table_id = order["table_id"]
+        cursor.execute("SELECT table_number FROM restaurant_tables WHERE id = %s", (table_id,))
+        t_row = cursor.fetchone()
+        table_number = t_row["table_number"] if t_row else table_id
+
+        old_quantity = int(item["quantity"])
+        item_name = item.get("item_name") or "Food Item"
+
+        # Check actor (Customer or Staff)
+        auth_header = request.headers.get("Authorization", "")
+        actor = "Customer"
+        if auth_header.startswith("Bearer "):
+            try:
+                payload = decode_token(auth_header.split(" ", 1)[1])
+                if payload.get("role") in ["owner", "manager", "staff"]:
+                    actor = f"Staff ({payload.get('username')})"
+            except:
+                pass
 
         # 3. Update or delete
         if new_quantity <= 0:
@@ -984,6 +1106,17 @@ def update_order_item_quantity(order_id, item_id):
             )
             if cursor.fetchone()["active_count"] == 0:
                 cursor.execute("UPDATE restaurant_tables SET status = 'available' WHERE id = %s", (table_id,))
+
+            try:
+                msg = f"Table {table_number}: {actor} removed all items — Order #{order_id} cancelled"
+                cursor.execute(
+                    "INSERT INTO order_notifications (order_id, table_id, table_number, change_type, message, item_name, old_quantity, new_quantity) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (order_id, table_id, table_number, "order_cancelled", msg, item_name, old_quantity, 0)
+                )
+            except Exception as ne:
+                print(f"[WARN] Failed to insert notification: {ne}")
+
             conn.commit()
             return success_response({
                 "message": f"Item #{item_id} removed. Order had no items remaining and was cancelled.",
@@ -996,6 +1129,24 @@ def update_order_item_quantity(order_id, item_id):
             cursor.execute("UPDATE orders SET total_price = %s WHERE id = %s", (new_total, order_id))
         except Exception:
             pass
+
+        # Record notification for staff
+        try:
+            if new_quantity <= 0:
+                msg = f"Table {table_number}: {actor} removed '{item_name}' from Order #{order_id}"
+                c_type = "item_deleted"
+            else:
+                msg = f"Table {table_number}: {actor} changed '{item_name}' qty from {old_quantity} to {new_quantity}"
+                c_type = "item_updated"
+
+            cursor.execute(
+                "INSERT INTO order_notifications (order_id, table_id, table_number, change_type, message, item_name, old_quantity, new_quantity) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (order_id, table_id, table_number, c_type, msg, item_name, old_quantity, max(new_quantity, 0))
+            )
+        except Exception as ne:
+            print(f"[WARN] Failed to insert notification: {ne}")
+
         conn.commit()
 
         updated_order = fetch_order_with_rounds(cursor, order_id)
@@ -1024,7 +1175,7 @@ def update_order_item_quantity(order_id, item_id):
 @order_bp.route("/api/orders/<int:order_id>/items/<int:item_id>", methods=["DELETE"])
 def delete_order_item(order_id, item_id):
     """
-    Deletes an item from an active order.
+    Deletes an item from an active order and notifies staff.
     """
     conn = None
     cursor = None
@@ -1040,11 +1191,35 @@ def delete_order_item(order_id, item_id):
         if order["status"] in ("completed", "cancelled"):
             return error_response(f"Cannot delete items from an order that is {order['status']}", 400)
 
-        cursor.execute("SELECT id FROM order_items WHERE id = %s AND order_id = %s", (item_id, order_id))
-        if not cursor.fetchone():
+        cursor.execute(
+            "SELECT oi.id, oi.order_id, oi.quantity, m.name AS item_name "
+            "FROM order_items oi "
+            "LEFT JOIN menu_items m ON oi.menu_item_id = m.id "
+            "WHERE oi.id = %s AND oi.order_id = %s",
+            (item_id, order_id)
+        )
+        item = cursor.fetchone()
+        if not item:
             return error_response(f"Item #{item_id} not found in Order #{order_id}", 404)
 
         table_id = order["table_id"]
+        cursor.execute("SELECT table_number FROM restaurant_tables WHERE id = %s", (table_id,))
+        t_row = cursor.fetchone()
+        table_number = t_row["table_number"] if t_row else table_id
+
+        old_quantity = int(item["quantity"])
+        item_name = item.get("item_name") or "Food Item"
+
+        auth_header = request.headers.get("Authorization", "")
+        actor = "Customer"
+        if auth_header.startswith("Bearer "):
+            try:
+                payload = decode_token(auth_header.split(" ", 1)[1])
+                if payload.get("role") in ["owner", "manager", "staff"]:
+                    actor = f"Staff ({payload.get('username')})"
+            except:
+                pass
+
         cursor.execute("DELETE FROM order_items WHERE id = %s", (item_id,))
 
         cursor.execute("SELECT COUNT(*) AS remaining, COALESCE(SUM(quantity * price), 0.0) AS new_total FROM order_items WHERE order_id = %s", (order_id,))
@@ -1060,6 +1235,17 @@ def delete_order_item(order_id, item_id):
             )
             if cursor.fetchone()["active_count"] == 0:
                 cursor.execute("UPDATE restaurant_tables SET status = 'available' WHERE id = %s", (table_id,))
+
+            try:
+                msg = f"Table {table_number}: {actor} removed all items — Order #{order_id} cancelled"
+                cursor.execute(
+                    "INSERT INTO order_notifications (order_id, table_id, table_number, change_type, message, item_name, old_quantity, new_quantity) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (order_id, table_id, table_number, "order_cancelled", msg, item_name, old_quantity, 0)
+                )
+            except Exception as ne:
+                print(f"[WARN] Failed to insert notification: {ne}")
+
             conn.commit()
             return success_response({
                 "message": f"Item #{item_id} deleted. Order had no items remaining and was cancelled.",
@@ -1072,6 +1258,17 @@ def delete_order_item(order_id, item_id):
             cursor.execute("UPDATE orders SET total_price = %s WHERE id = %s", (new_total, order_id))
         except Exception:
             pass
+
+        try:
+            msg = f"Table {table_number}: {actor} removed '{item_name}' from Order #{order_id}"
+            cursor.execute(
+                "INSERT INTO order_notifications (order_id, table_id, table_number, change_type, message, item_name, old_quantity, new_quantity) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (order_id, table_id, table_number, "item_deleted", msg, item_name, old_quantity, 0)
+            )
+        except Exception as ne:
+            print(f"[WARN] Failed to insert notification: {ne}")
+
         conn.commit()
 
         updated_order = fetch_order_with_rounds(cursor, order_id)
@@ -1091,6 +1288,105 @@ def delete_order_item(order_id, item_id):
             cursor.close()
         if conn:
             conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# GET /api/orders/notifications
+# Staff: fetch order notifications (customer changes, round additions)
+# ══════════════════════════════════════════════════════════════════════════
+@order_bp.route("/api/orders/notifications", methods=["GET"])
+def get_order_notifications():
+    """
+    Returns latest notifications for staff about customer order changes.
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, order_id, table_id, table_number, change_type, message, "
+            "item_name, old_quantity, new_quantity, is_read, created_at "
+            "FROM order_notifications "
+            "ORDER BY created_at DESC LIMIT 50"
+        )
+        notifs = cursor.fetchall()
+        unread_count = sum(1 for n in notifs if not n.get("is_read"))
+        for n in notifs:
+            if n.get("created_at"):
+                n["created_at"] = local_iso(n["created_at"])
+
+        return success_response({"notifications": notifs, "unread_count": unread_count}, 200)
+    except Exception as e:
+        print(f"[ERROR] get_order_notifications: {e}")
+        return error_response("Failed to fetch notifications", 500)
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PATCH /api/orders/notifications/read
+# Staff: mark notifications as read
+# ══════════════════════════════════════════════════════════════════════════
+@order_bp.route("/api/orders/notifications/read", methods=["PATCH"])
+def mark_order_notifications_read():
+    """
+    Marks one or all notifications as read.
+    """
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        notif_id = data.get("id")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if notif_id:
+            cursor.execute("UPDATE order_notifications SET is_read = 1 WHERE id = %s", (notif_id,))
+        else:
+            cursor.execute("UPDATE order_notifications SET is_read = 1 WHERE is_read = 0")
+        conn.commit()
+
+        return success_response({"message": "Notifications marked as read"}, 200)
+    except Exception as e:
+        print(f"[ERROR] mark_order_notifications_read: {e}")
+        return error_response("Failed to mark notifications read", 500)
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DELETE /api/orders/notifications/clear
+# Staff: clear all notifications
+# ══════════════════════════════════════════════════════════════════════════
+@order_bp.route("/api/orders/notifications/clear", methods=["DELETE"])
+def clear_order_notifications():
+    """
+    Deletes all notifications.
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM order_notifications")
+        conn.commit()
+        return success_response({"message": "Notifications cleared"}, 200)
+    except Exception as e:
+        print(f"[ERROR] clear_order_notifications: {e}")
+        return error_response("Failed to clear notifications", 500)
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
 
 
 

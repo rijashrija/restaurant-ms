@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChefHat, ClipboardList, Utensils, LayoutDashboard, Home,
-  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid, Menu, X
+  Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid, Menu, X,
+  Bell, BellRing, CheckCheck
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { QRCodeSVG } from "qrcode.react";
-import { getOrders, getOrderDetails, updateOrderStatus, getAllMenu, updateMenuAvailability, getTables, addTable, deleteTable, updateTableStatus, addMenuItem, updateMenuItem, exportOrderHistory, getRestaurantSettings, updateRestaurantSettings, RestaurantSettings, uploadLogo, getCategories, Category, addCategory, toggleCategory, updateCategory, transferTable, getDashboardStats, API_BASE_URL } from "../../services/api";
+import { getOrders, getOrderDetails, updateOrderStatus, getAllMenu, updateMenuAvailability, getTables, addTable, deleteTable, updateTableStatus, addMenuItem, updateMenuItem, exportOrderHistory, getRestaurantSettings, updateRestaurantSettings, RestaurantSettings, uploadLogo, getCategories, Category, addCategory, toggleCategory, updateCategory, transferTable, getDashboardStats, API_BASE_URL, getOrderNotifications, markOrderNotificationsRead, clearOrderNotifications, OrderNotification } from "../../services/api";
 import { getToken, getUser, clearToken, createManager, listManagers, updateManager, deleteManager, AuthUser } from "../../services/auth";
 import { Table } from "../../lib/types";
 
@@ -23,6 +24,13 @@ export default function AdminDashboard() {
   // Orders State
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+
+  // Customer Order Change Notifications State
+  const [notifications, setNotifications] = useState<OrderNotification[]>([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
+  const [showNotificationsDrawer, setShowNotificationsDrawer] = useState<boolean>(false);
+  const [activeToast, setActiveToast] = useState<OrderNotification | null>(null);
+  const prevLatestNotifIdRef = useRef<number | null>(null);
 
   // Transfer Table State
   const [isTransferringTable, setIsTransferringTable] = useState(false);
@@ -121,11 +129,74 @@ export default function AdminDashboard() {
     }
     setCurrentUser(user);
     loadOrders();
+    loadNotifications();
     setIsLoading(false);
 
-    const intervalId = setInterval(loadOrders, 15000);
+    const intervalId = setInterval(() => {
+      loadOrders();
+      loadNotifications();
+    }, 10000);
     return () => clearInterval(intervalId);
   }, [router]);
+
+  useEffect(() => {
+    if (!activeToast) return;
+    const t = setTimeout(() => setActiveToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [activeToast]);
+
+  const playChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(587.33, now);
+      gain1.gain.setValueAtTime(0.12, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.3);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(880, now + 0.15);
+      gain2.gain.setValueAtTime(0.18, now + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.15);
+      osc2.stop(now + 0.5);
+    } catch {
+      // Audio autoplay policy
+    }
+  };
+
+  const loadNotifications = async () => {
+    try {
+      const res = await getOrderNotifications();
+      const notifs = res.notifications || [];
+      setNotifications(notifs);
+      setUnreadNotifCount(res.unread_count || 0);
+
+      if (notifs.length > 0) {
+        const latest = notifs[0];
+        if (prevLatestNotifIdRef.current !== null && latest.id > prevLatestNotifIdRef.current && !latest.is_read) {
+          playChime();
+          setActiveToast(latest);
+          loadOrders();
+        }
+        prevLatestNotifIdRef.current = latest.id;
+      }
+    } catch (err) {
+      console.error("Failed to load notifications:", err);
+    }
+  };
 
   useEffect(() => {
     if (currentUser) {
@@ -699,6 +770,59 @@ export default function AdminDashboard() {
   };
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+  const getOrderStaffNames = (order: any): string[] => {
+    if (!order) return [];
+    const staff: string[] = [];
+    const seen = new Set<string>();
+
+    const addName = (name?: string | null) => {
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        staff.push(trimmed);
+      }
+    };
+
+    // 1. Initial placed_by_username
+    if (order.placed_by_username) {
+      addName(order.placed_by_username);
+    }
+
+    // 2. all_staff array if present from backend
+    if (order.all_staff && Array.isArray(order.all_staff)) {
+      order.all_staff.forEach(addName);
+    }
+
+    // 3. Rounds servers
+    if (order.rounds && Array.isArray(order.rounds)) {
+      order.rounds.forEach((rnd: any) => {
+        if (Array.isArray(rnd.served_by_usernames)) {
+          rnd.served_by_usernames.forEach(addName);
+        }
+        if (rnd.served_by_username) {
+          rnd.served_by_username.split(",").forEach(addName);
+        }
+      });
+    }
+
+    // 4. Items servers
+    if (order.items && Array.isArray(order.items)) {
+      order.items.forEach((item: any) => {
+        addName(item.served_by_username);
+      });
+    }
+
+    // 5. servers_list comma-separated string
+    if (order.servers_list) {
+      order.servers_list.split(",").forEach(addName);
+    }
+
+    return staff;
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "new": return "bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm shadow-blue-200 border-transparent";
@@ -731,9 +855,23 @@ export default function AdminDashboard() {
           )}
           <h2 className="text-lg font-bold truncate max-w-[200px]">{restroSettings?.restro_name || "Panel"}</h2>
         </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-white/10 rounded-lg">
-          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowNotificationsDrawer(true)}
+            className="relative p-2 bg-white/10 rounded-lg text-white"
+            title="Customer Notifications"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadNotifCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                {unreadNotifCount > 9 ? "9+" : unreadNotifCount}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-white/10 rounded-lg">
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </div>
 
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
@@ -832,16 +970,30 @@ export default function AdminDashboard() {
               <p className="text-sm font-semibold" style={{ color: "#f0e6d8" }}>{currentUser?.username}</p>
               <p className="text-xs capitalize" style={{ color: "#8a7260" }}>{currentUser?.role}</p>
             </div>
-            <button
-              onClick={handleLogout}
-              className="p-2 transition-colors rounded-lg"
-              style={{ color: "#8a7260" }}
-              onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-              onMouseLeave={e => (e.currentTarget.style.color = "#8a7260")}
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowNotificationsDrawer(true)}
+                className="relative p-2 transition-colors rounded-lg text-stone-400 hover:text-amber-400"
+                title="Customer Order Alerts"
+              >
+                <Bell className="w-5 h-5" />
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotifCount > 9 ? "9+" : unreadNotifCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="p-2 transition-colors rounded-lg"
+                style={{ color: "#8a7260" }}
+                onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
+                onMouseLeave={e => (e.currentTarget.style.color = "#8a7260")}
+                title="Logout"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -927,6 +1079,20 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">Recent Orders</h2>
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setShowNotificationsDrawer(true)}
+                    className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white border border-gray-200 hover:border-amber-400 shadow-xs text-gray-800"
+                    title="Customer order activity alerts"
+                  >
+                    <Bell className="w-4 h-4 text-amber-600" />
+                    <span>Alerts</span>
+                    {unreadNotifCount > 0 && (
+                      <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                        {unreadNotifCount}
+                      </span>
+                    )}
+                  </button>
+
                   <button
                     onClick={() => {
                       setIsTransferringTable(!isTransferringTable);
@@ -1115,6 +1281,16 @@ export default function AdminDashboard() {
                               <Clock className="w-3 h-3 text-amber-600" />
                               Ordered {order.order_count || 1} time{(order.order_count || 1) > 1 ? "s" : ""}
                             </span>
+                            {(() => {
+                              const unreadForOrder = notifications.filter(n => n.order_id === order.id && !n.is_read);
+                              if (unreadForOrder.length === 0) return null;
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-stone-950 border border-amber-600 shadow-xs animate-pulse">
+                                  <BellRing className="w-3 h-3 text-stone-950" />
+                                  Customer Modified ({unreadForOrder.length})
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                         <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.status)} uppercase`}>
@@ -1125,9 +1301,15 @@ export default function AdminDashboard() {
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3 text-gray-500" />
                           {new Date(order.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}, {new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          {order.placed_by_username && (
-                            <span className="ml-2 bg-blue-100 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">by {order.placed_by_username}</span>
-                          )}
+                          {(() => {
+                            const staffList = getOrderStaffNames(order);
+                            if (staffList.length === 0) return null;
+                            return (
+                              <span className="ml-2 bg-blue-100 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                                by {staffList.join(", ")}
+                              </span>
+                            );
+                          })()}
                         </div>
                         {order.servers_list && (
                           <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
@@ -1959,9 +2141,15 @@ export default function AdminDashboard() {
                 <div>
                   <p className="text-sm text-gray-800 font-medium">Table</p>
                   <p className="text-2xl font-bold">{selectedOrder.table_number}</p>
-                  {selectedOrder.placed_by_username && (
-                    <p className="text-xs text-blue-600 font-medium mt-1">📋 Placed by <strong>{selectedOrder.placed_by_username}</strong></p>
-                  )}
+                  {(() => {
+                    const staffList = getOrderStaffNames(selectedOrder);
+                    if (staffList.length === 0) return null;
+                    return (
+                      <p className="text-xs text-blue-600 font-medium mt-1 leading-snug">
+                        📋 Placed by <strong>{staffList.join(", ")}</strong>
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-gray-800 font-medium mb-1">Status</p>
@@ -1970,6 +2158,44 @@ export default function AdminDashboard() {
                   </span>
                 </div>
               </div>
+              {/* Customer Activity Alert for this Order */}
+              {(() => {
+                const orderNotifs = notifications.filter(n => n.order_id === selectedOrder.id);
+                if (orderNotifs.length === 0) return null;
+                return (
+                  <div className="mb-6 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 shadow-xs space-y-2">
+                    <div className="font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-amber-900">
+                        <BellRing className="w-3.5 h-3.5 text-amber-600" />
+                        Customer Order Changes:
+                      </span>
+                      <button
+                        onClick={async () => {
+                          for (const on of orderNotifs.filter(n => !n.is_read)) {
+                            await markOrderNotificationsRead(on.id);
+                          }
+                          await loadNotifications();
+                        }}
+                        className="text-[10px] text-amber-700 hover:text-amber-950 font-semibold underline"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+                    <div className="space-y-1.5">
+                      {orderNotifs.slice(0, 3).map((on) => (
+                        <div key={on.id} className="text-[11px] bg-white p-2 rounded-xl border border-amber-200 shadow-2xs">
+                          <div className="font-medium text-stone-800">{on.message}</div>
+                          <div className="text-[10px] text-stone-500 mt-0.5 flex justify-between items-center">
+                            <span>{on.created_at ? new Date(on.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }) : ""}</span>
+                            {!on.is_read && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1 rounded">NEW</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Customer Order Count Highlight Card */}
               <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-between shadow-xs">
                 <div>
@@ -2137,6 +2363,184 @@ export default function AdminDashboard() {
               >
                 Yes, Mark Available
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Live Toast Notification for Customer Order Changes ─────── */}
+      {activeToast && (
+        <div className="fixed top-4 right-4 z-50 max-w-sm w-full bg-stone-900 text-white p-4 rounded-2xl shadow-2xl border border-amber-500/50 animate-in slide-in-from-top-4 flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+            <BellRing className="w-5 h-5 animate-bounce" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Customer Order Alert</span>
+              <button onClick={() => setActiveToast(null)} className="text-stone-400 hover:text-white text-xs">✕</button>
+            </div>
+            <p className="text-sm font-medium text-stone-100 mt-1 leading-snug">{activeToast.message}</p>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button
+                onClick={async () => {
+                  await markOrderNotificationsRead(activeToast.id);
+                  setActiveTab("orders");
+                  handleViewOrder(activeToast.order_id);
+                  setActiveToast(null);
+                  loadNotifications();
+                }}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 transition-colors"
+              >
+                View Order #{activeToast.order_id}
+              </button>
+              <button
+                onClick={() => setActiveToast(null)}
+                className="text-xs text-stone-400 hover:text-stone-200 px-2 py-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Customer Order Notifications Drawer ─────────────────────── */}
+      {showNotificationsDrawer && (
+        <div
+          className="fixed inset-0 z-50 flex justify-end"
+          style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(2px)" }}
+          onClick={() => setShowNotificationsDrawer(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="p-5 border-b border-stone-200 flex items-center justify-between bg-stone-900 text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base">Customer Order Alerts</h3>
+                  <p className="text-xs text-stone-400">
+                    {unreadNotifCount} unread notification{unreadNotifCount !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNotificationsDrawer(false)}
+                className="p-1.5 text-stone-400 hover:text-white rounded-lg hover:bg-stone-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Actions Bar */}
+            <div className="px-5 py-2.5 bg-stone-50 border-b border-stone-200 flex justify-between items-center text-xs">
+              <button
+                onClick={async () => {
+                  await markOrderNotificationsRead();
+                  await loadNotifications();
+                }}
+                disabled={unreadNotifCount === 0}
+                className="font-semibold text-amber-800 hover:text-amber-950 flex items-center gap-1 disabled:opacity-40"
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                Mark all as read
+              </button>
+              <button
+                onClick={async () => {
+                  if (window.confirm("Clear all notification history?")) {
+                    await clearOrderNotifications();
+                    await loadNotifications();
+                  }
+                }}
+                disabled={notifications.length === 0}
+                className="text-stone-500 hover:text-red-600 disabled:opacity-40"
+              >
+                Clear all
+              </button>
+            </div>
+
+            {/* Notifications List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {notifications.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-stone-400">
+                  <Bell className="w-12 h-12 stroke-[1.5] mb-2 opacity-30" />
+                  <p className="font-medium text-sm text-stone-600">No notifications yet</p>
+                  <p className="text-xs text-stone-400 mt-1">Changes made by customers will appear here in real-time.</p>
+                </div>
+              ) : (
+                notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      n.is_read
+                        ? "bg-white border-stone-200 opacity-80"
+                        : "bg-amber-50/70 border-amber-300 shadow-xs"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          n.change_type === "item_deleted"
+                            ? "bg-red-100 text-red-800 border border-red-200"
+                            : n.change_type === "order_cancelled"
+                            ? "bg-stone-900 text-stone-100"
+                            : n.change_type === "round_added"
+                            ? "bg-blue-100 text-blue-800 border border-blue-200"
+                            : "bg-amber-200 text-amber-900 border border-amber-300"
+                        }`}>
+                          {n.change_type === "item_deleted"
+                            ? "Item Removed"
+                            : n.change_type === "order_cancelled"
+                            ? "Order Cancelled"
+                            : n.change_type === "round_added"
+                            ? "New Round Added"
+                            : "Qty Updated"}
+                        </span>
+                        <span className="text-xs font-bold text-stone-900">Table {n.table_number}</span>
+                      </div>
+                      <span className="text-[10px] text-stone-500 font-medium">
+                        {n.created_at ? new Date(n.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }) : ""}
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-medium text-stone-800 leading-snug mb-3">
+                      {n.message}
+                    </p>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-stone-200/60">
+                      <button
+                        onClick={async () => {
+                          if (!n.is_read) {
+                            await markOrderNotificationsRead(n.id);
+                            await loadNotifications();
+                          }
+                          setActiveTab("orders");
+                          handleViewOrder(n.order_id);
+                          setShowNotificationsDrawer(false);
+                        }}
+                        className="text-xs font-bold text-amber-900 hover:text-amber-950 flex items-center gap-1"
+                      >
+                        <span>View Order #{n.order_id} &rarr;</span>
+                      </button>
+                      {!n.is_read && (
+                        <button
+                          onClick={async () => {
+                            await markOrderNotificationsRead(n.id);
+                            await loadNotifications();
+                          }}
+                          className="text-[11px] text-stone-500 hover:text-stone-800"
+                        >
+                          Mark as read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

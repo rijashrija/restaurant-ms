@@ -62,10 +62,29 @@ import mysql.connector
 from mysql.connector import Error
 import sys
 import os
+import datetime
 from flask import jsonify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
+
+
+def _configure_timezone(connection):
+    """
+    Sets MySQL session timezone to match the server's local operating system
+    timezone (e.g. UTC+05:45 for Nepal Standard Time).
+    This ensures TIMESTAMP columns (like created_at) are stored and returned
+    accurately in local time without UTC offset mismatch.
+    """
+    try:
+        offset = datetime.datetime.now().astimezone().strftime("%z")
+        if len(offset) == 5:
+            formatted_tz = f"{offset[:3]}:{offset[3:]}"
+            tz_cursor = connection.cursor()
+            tz_cursor.execute(f"SET time_zone = '{formatted_tz}'")
+            tz_cursor.close()
+    except Exception as tz_err:
+        print(f"[WARN] Failed to set session time_zone: {tz_err}")
 
 
 def get_db_connection():
@@ -101,11 +120,14 @@ def get_db_connection():
                 ssl_args = dict(conn_args)
                 ssl_args["ssl_disabled"] = False
                 ssl_args["ssl_verify_identity"] = False
-                return mysql.connector.connect(**ssl_args)
+                connection = mysql.connector.connect(**ssl_args)
+                _configure_timezone(connection)
+                return connection
             except Exception as ssl_err:
                 print(f"[WARN] SSL connection attempt failed ({ssl_err}), trying standard connection...")
 
         connection = mysql.connector.connect(**conn_args)
+        _configure_timezone(connection)
         return connection
     except Error as e:
         raise Exception(f"Cannot connect to MySQL: {e}")

@@ -460,3 +460,50 @@ export async function transferTable(fromTableId: number, toTableId: number, toke
   return data;
 }
 
+export interface OrderNotification {
+  id: number;
+  order_id: number;
+  table_id: number;
+  table_number: number;
+  change_type: "item_updated" | "item_deleted" | "round_added" | "order_cancelled";
+  message: string;
+  item_name?: string | null;
+  old_quantity?: number | null;
+  new_quantity?: number | null;
+  is_read: number | boolean;
+  created_at: string;
+}
+
+export async function getOrderNotifications(): Promise<{ notifications: OrderNotification[]; unread_count: number }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/orders/notifications`);
+    if (!res.ok) return { notifications: [], unread_count: 0 };
+    return res.json();
+  } catch {
+    return { notifications: [], unread_count: 0 };
+  }
+}
+
+export async function markOrderNotificationsRead(id?: number): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/orders/notifications/read`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(id ? { id } : {}),
+    });
+  } catch (err) {
+    console.error("Failed to mark notifications read:", err);
+  }
+}
+
+export async function clearOrderNotifications(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/orders/notifications/clear`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    console.error("Failed to clear notifications:", err);
+  }
+}
+
+

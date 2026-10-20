@@ -29,6 +29,7 @@ export interface Order {
   order_count?: number;
   total_price?: number;
   servers_list?: string | null;
+  all_staff?: string[];
 }
 
 export interface OrderDetailItem {
