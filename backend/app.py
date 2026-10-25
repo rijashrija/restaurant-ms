@@ -219,5 +219,5 @@ if __name__ == "__main__":
     print("[OK] Health check: http://localhost:5000/health")
     print("=" * 50)
     print("Press CTRL+C to stop the server\n")
-    app.run(host="0.0.0.0", port=5000, debug=Config.DEBUG)
+    app.run(host="0.0.0.0", port=5000, debug=Config.DEBUG, threaded=True)
 

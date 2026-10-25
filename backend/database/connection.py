@@ -59,14 +59,55 @@ Dicts are much easier to work with and convert to JSON.
 """
 
 import mysql.connector
-from mysql.connector import Error
+from mysql.connector import Error, pooling
 import sys
 import os
 import datetime
+import threading
 from flask import jsonify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
+
+_pool_lock = threading.Lock()
+_connection_pool = None
+
+
+def _build_connection_args():
+    conn_args = {
+        "host": Config.DB_HOST,
+        "port": Config.DB_PORT,
+        "user": Config.DB_USER,
+        "password": Config.DB_PASSWORD,
+        "database": Config.DB_NAME,
+        "autocommit": False,
+    }
+    if "localhost" not in str(Config.DB_HOST) and "127.0.0.1" not in str(Config.DB_HOST):
+        conn_args["ssl_disabled"] = False
+        conn_args["ssl_verify_identity"] = False
+    return conn_args
+
+
+def _get_or_create_pool():
+    global _connection_pool
+    if _connection_pool is not None:
+        return _connection_pool
+
+    with _pool_lock:
+        if _connection_pool is None:
+            try:
+                conn_args = _build_connection_args()
+                _connection_pool = pooling.MySQLConnectionPool(
+                    pool_name="restaurant_pool",
+                    pool_size=10,
+                    pool_reset_session=True,
+                    **conn_args
+                )
+                print("[INFO] MySQL connection pool initialized (size=10).")
+            except Exception as pool_err:
+                print(f"[WARN] Failed to initialize connection pool ({pool_err}). Falling back to standalone connections.")
+                _connection_pool = None
+    return _connection_pool
 
 
 def _configure_timezone(connection):
@@ -89,43 +130,21 @@ def _configure_timezone(connection):
 
 def get_db_connection():
     """
-    Creates and returns a MySQL connection with dictionary cursor support.
-
-    Usage in a route:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM menu_items")
-        items = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return jsonify(items), 200
-
-    Returns:
-        mysql.connector.connection.MySQLConnection
-    Raises:
-        Exception if the connection fails
+    Returns a MySQL connection with dictionary cursor support,
+    drawn from the connection pool when available to avoid SSL/TCP handshake latency.
     """
     try:
-        conn_args = {
-            "host": Config.DB_HOST,
-            "port": Config.DB_PORT,
-            "user": Config.DB_USER,
-            "password": Config.DB_PASSWORD,
-            "database": Config.DB_NAME,
-            "autocommit": False,
-        }
-        # If connecting to remote cloud database (e.g. Aiven), configure SSL parameters with fallback
-        if "localhost" not in str(Config.DB_HOST) and "127.0.0.1" not in str(Config.DB_HOST):
+        pool = _get_or_create_pool()
+        if pool:
             try:
-                ssl_args = dict(conn_args)
-                ssl_args["ssl_disabled"] = False
-                ssl_args["ssl_verify_identity"] = False
-                connection = mysql.connector.connect(**ssl_args)
-                _configure_timezone(connection)
-                return connection
-            except Exception as ssl_err:
-                print(f"[WARN] SSL connection attempt failed ({ssl_err}), trying standard connection...")
+                conn = pool.get_connection()
+                _configure_timezone(conn)
+                return conn
+            except Exception as pool_fetch_err:
+                print(f"[WARN] Pool get_connection failed ({pool_fetch_err}), attempting direct connection...")
 
+        # Fallback to direct connection if pooling is unavailable or exhausted
+        conn_args = _build_connection_args()
         connection = mysql.connector.connect(**conn_args)
         _configure_timezone(connection)
         return connection
