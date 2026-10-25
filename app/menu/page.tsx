@@ -104,7 +104,8 @@ function getStatusBadge(status?: string) {
 
 function MenuContent() {
   const searchParams = useSearchParams();
-  const tableIdentifier = searchParams.get("table");
+  // Fallback: if URL query is lost (e.g. mobile Safari tab reload), restore from sessionStorage
+  const tableIdentifier = searchParams.get("table") || sessionStorage?.getItem("rms_table") || null;
 
   const [table, setTable] = useState<Table | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -251,6 +252,12 @@ function MenuContent() {
         return;
       }
 
+      // Persist the table ID to sessionStorage so mobile tab reloads can restore it
+      try { sessionStorage.setItem("rms_table", tableIdentifier); } catch {}
+
+      // Check if this table was already seen (i.e. mobile reload, not a fresh scan)
+      const isReload = sessionStorage.getItem("rms_table_seen") === tableIdentifier;
+
       try {
         // First verify the table exists and check its status
         const tableData = await verifyTable(tableIdentifier);
@@ -283,14 +290,18 @@ function MenuContent() {
           setStaffList(list);
         }).catch(() => {});
 
-        // Trigger splash screen
-        setShowSplash(true);
         setIsLoading(false);
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => setSplashVisible(true));
-        });
-        setTimeout(() => setSplashFadingOut(true), 2500);
-        setTimeout(() => setShowSplash(false), 3100);
+
+        // Only show splash on the FIRST scan, not on mobile tab reloads
+        if (!isReload) {
+          try { sessionStorage.setItem("rms_table_seen", tableIdentifier); } catch {}
+          setShowSplash(true);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => setSplashVisible(true));
+          });
+          setTimeout(() => setSplashFadingOut(true), 2500);
+          setTimeout(() => setShowSplash(false), 3100);
+        }
       } catch (err: any) {
         setError(err.message || "Failed to load menu. Please try again.");
         setIsLoading(false);

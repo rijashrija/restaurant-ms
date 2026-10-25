@@ -1,9 +1,27 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChefHat, ArrowRight } from "lucide-react";
 
 export default function HomePage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // If staff is already logged in, skip the landing page and go straight to admin.
+    // This prevents mobile Safari from showing this page when it reloads a suspended tab.
+    try {
+      const token = localStorage.getItem("rms_token");
+      const user = localStorage.getItem("rms_user");
+      if (token && user) {
+        router.replace("/admin");
+      }
+    } catch {
+      // localStorage not available (e.g. SSR or private mode)
+    }
+  }, [router]);
+
   return (
     <main
       className="min-h-screen flex items-center justify-center text-white"

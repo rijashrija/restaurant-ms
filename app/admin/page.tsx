@@ -599,11 +599,34 @@ export default function AdminDashboard() {
 
 
   // ── Order Details / Status ────────────────────────────────────────────────
+  // Listen for the browser back button: if the order detail panel is open, close it
+  // instead of navigating away from the admin page (critical for mobile UX).
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (e.state?.orderDetail) {
+        // Back was pressed while detail panel was open — close the panel
+        setSelectedOrder(null);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const handleViewOrder = async (orderId: number) => {
     try {
       const data = await getOrderDetails(orderId);
+      // Push a fake history entry so the mobile back button closes the panel, not the page
+      window.history.pushState({ orderDetail: orderId }, "");
       setSelectedOrder(data);
     } catch { alert("Failed to load order details."); }
+  };
+
+  const handleCloseOrderDetail = () => {
+    // Go back in history (removes the fake entry we pushed) then clear state
+    if (window.history.state?.orderDetail) {
+      window.history.back();
+    }
+    setSelectedOrder(null);
   };
 
   const handleExportOrders = async () => {
@@ -2156,7 +2179,7 @@ export default function AdminDashboard() {
           <div className="w-full md:w-96 bg-white shadow-xl flex flex-col h-screen md:h-auto border-l border-gray-200 z-10 absolute md:static top-0 right-0">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold">Order #{selectedOrder.id}</h2>
-              <button onClick={() => setSelectedOrder(null)} className="md:hidden p-2 text-gray-800 bg-white rounded-full">✕</button>
+              <button onClick={handleCloseOrderDetail} className="md:hidden p-2 text-gray-800 bg-white rounded-full">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <div className="mb-6 flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100">
