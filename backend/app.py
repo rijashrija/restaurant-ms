@@ -219,5 +219,12 @@ if __name__ == "__main__":
     print("[OK] Health check: http://localhost:5000/health")
     print("=" * 50)
     print("Press CTRL+C to stop the server\n")
+    # Pre-warm database pool connection
+    try:
+        from database.connection import get_db_connection
+        _init_conn = get_db_connection()
+        _init_conn.close()
+    except Exception as _e:
+        print(f"[WARN] Database pool pre-warm notice: {_e}")
     app.run(host="0.0.0.0", port=5000, debug=Config.DEBUG, threaded=True)
 

@@ -116,7 +116,10 @@ export default function AdminDashboard() {
 
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── Auth Guard ────────────────────────────────────────────────────────────
+  const isPollingRef = useRef<boolean>(false);
+  const isLoadingOrdersRef = useRef<boolean>(false);
+
+  // ── Auth Guard & Polling ───────────────────────────────────────────────────
   useEffect(() => {
     const token = getToken();
     const user = getUser();
@@ -132,10 +135,19 @@ export default function AdminDashboard() {
     loadNotifications();
     setIsLoading(false);
 
-    const intervalId = setInterval(() => {
-      loadOrders();
-      loadNotifications();
-    }, 10000);
+    // Poll notifications every 12 seconds with overlap protection.
+    // Notice: We don't blindly re-query all orders every cycle.
+    // If a new notification arrives, loadNotifications() triggers loadOrders() automatically.
+    const intervalId = setInterval(async () => {
+      if (isPollingRef.current) return;
+      isPollingRef.current = true;
+      try {
+        await loadNotifications();
+      } finally {
+        isPollingRef.current = false;
+      }
+    }, 12000);
+
     return () => clearInterval(intervalId);
   }, [router]);
 
@@ -228,12 +240,22 @@ export default function AdminDashboard() {
   }, [activeTab, currentUser]);
 
   // ── Orders ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeTab === "orders") {
+      loadOrders();
+    }
+  }, [activeTab]);
+
   const loadOrders = async () => {
+    if (isLoadingOrdersRef.current) return;
+    isLoadingOrdersRef.current = true;
     try {
       const data = await getOrders();
       setOrders(data);
     } catch (err) {
       console.error("Failed to fetch orders:", err);
+    } finally {
+      isLoadingOrdersRef.current = false;
     }
   };
 
