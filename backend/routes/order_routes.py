@@ -363,15 +363,28 @@ def create_order():
 @order_bp.route("/api/orders", methods=["GET"])
 def get_orders():
     """
-    Returns a list of orders, newest first.
+    Returns a paginated list of orders, newest first.
     Includes order_count (how many times customer ordered), total_price,
     and servers_list (all staff who served items to this customer).
+    Supports ?page=1&limit=20 for batch loading and pagination.
     """
     conn = None
     cursor = None
     try:
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=20, type=int)
+        if page < 1:
+            page = 1
+        limit = max(1, min(limit, 100))
+        offset = (page - 1) * limit
+
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+
+        # Get total count of orders for pagination metadata
+        cursor.execute("SELECT COUNT(*) AS total FROM orders")
+        count_res = cursor.fetchone()
+        total_orders = int(count_res["total"]) if count_res and count_res.get("total") is not None else 0
 
         try:
             cursor.execute(
@@ -387,7 +400,8 @@ def get_orders():
                 "LEFT JOIN users u_staff ON oi.served_by_user_id = u_staff.id "
                 "GROUP BY o.id, o.table_id, o.status, o.created_at, t.table_number, u.username "
                 "ORDER BY o.created_at DESC "
-                "LIMIT 50"
+                "LIMIT %s OFFSET %s",
+                (limit, offset)
             )
             orders = cursor.fetchall()
         except Exception:
@@ -403,7 +417,8 @@ def get_orders():
                 "LEFT JOIN order_items oi ON o.id = oi.order_id "
                 "GROUP BY o.id, o.table_id, o.status, o.created_at, t.table_number, u.username "
                 "ORDER BY o.created_at DESC "
-                "LIMIT 50"
+                "LIMIT %s OFFSET %s",
+                (limit, offset)
             )
             orders = cursor.fetchall()
 
@@ -421,7 +436,16 @@ def get_orders():
             order["servers_list"] = ", ".join(s_list) if s_list else None
             order["all_staff"] = s_list
 
-        return success_response({"orders": orders, "count": len(orders)}, 200)
+        has_more = (offset + len(orders)) < total_orders
+
+        return success_response({
+            "orders": orders,
+            "count": len(orders),
+            "total": total_orders,
+            "page": page,
+            "limit": limit,
+            "has_more": has_more
+        }, 200)
 
     except Exception as e:
         print(f"[ERROR] get_orders: {e}")

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ChefHat, ClipboardList, Utensils, LayoutDashboard, Home,
   Clock, Eye, EyeOff, LogOut, Users, PlusCircle, Printer, Download, Trash2, Tags, ChevronDown, ChevronRight, Edit2, GripVertical, ArrowRightLeft, ShoppingBag, LayoutGrid, Menu, X,
-  Bell, BellRing, CheckCheck
+  Bell, BellRing, CheckCheck, Loader2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { QRCodeSVG } from "qrcode.react";
@@ -24,6 +24,10 @@ export default function AdminDashboard() {
   // Orders State
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [ordersPage, setOrdersPage] = useState<number>(1);
+  const [totalOrders, setTotalOrders] = useState<number>(0);
+  const [hasMoreOrders, setHasMoreOrders] = useState<boolean>(false);
+  const [isLoadingMoreOrders, setIsLoadingMoreOrders] = useState<boolean>(false);
 
   // Customer Order Change Notifications State
   const [notifications, setNotifications] = useState<OrderNotification[]>([]);
@@ -246,16 +250,40 @@ export default function AdminDashboard() {
     }
   }, [activeTab]);
 
-  const loadOrders = async () => {
-    if (isLoadingOrdersRef.current) return;
-    isLoadingOrdersRef.current = true;
+  const loadOrders = async (targetPage: number = 1, append: boolean = false) => {
+    if (append) {
+      if (isLoadingMoreOrders) return;
+      setIsLoadingMoreOrders(true);
+    } else {
+      if (isLoadingOrdersRef.current) return;
+      isLoadingOrdersRef.current = true;
+    }
+
     try {
-      const data = await getOrders();
-      setOrders(data);
+      const data = await getOrders(targetPage, 15);
+      if (append) {
+        setOrders(prev => {
+          const existingIds = new Set(prev.map(o => o.id));
+          const newOrders = data.orders.filter(o => !existingIds.has(o.id));
+          return [...prev, ...newOrders];
+        });
+      } else {
+        setOrders(data.orders);
+      }
+      setOrdersPage(data.page);
+      setTotalOrders(data.total);
+      setHasMoreOrders(data.has_more);
     } catch (err) {
       console.error("Failed to fetch orders:", err);
     } finally {
       isLoadingOrdersRef.current = false;
+      setIsLoadingMoreOrders(false);
+    }
+  };
+
+  const handleLoadMoreOrders = () => {
+    if (hasMoreOrders && !isLoadingMoreOrders) {
+      loadOrders(ordersPage + 1, true);
     }
   };
 
@@ -1365,6 +1393,42 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Orders Pagination / Batch Loading Footer */}
+              {orders.length > 0 && (
+                <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-white/70 backdrop-blur-sm rounded-2xl border border-amber-100 shadow-xs">
+                  <div className="text-sm text-gray-600 font-medium">
+                    Showing <span className="font-bold text-gray-900">{orders.length}</span> of{" "}
+                    <span className="font-bold text-gray-900">{totalOrders}</span> orders
+                  </div>
+
+                  {hasMoreOrders ? (
+                    <button
+                      onClick={handleLoadMoreOrders}
+                      disabled={isLoadingMoreOrders}
+                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all transform active:scale-95 shadow-md hover:shadow-lg disabled:opacity-60"
+                      style={{ background: "linear-gradient(135deg, #c2703e 0%, #a85828 100%)" }}
+                    >
+                      {isLoadingMoreOrders ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Loading more orders...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="w-4 h-4" />
+                          <span>Load More Orders</span>
+                        </>
+                      )}
+                    </button>
+                  ) : totalOrders > 0 ? (
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+                      <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>All orders loaded</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

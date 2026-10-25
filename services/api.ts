@@ -319,11 +319,27 @@ export async function exportOrderHistory(token: string) {
 
 // ── ADMIN / MANAGER API FUNCTIONS ──────────────────────────────────────────
 
-export async function getOrders(): Promise<any[]> {
-  const res = await fetch(`${API_BASE_URL}/api/orders`);
+export interface PaginatedOrdersResponse {
+  orders: any[];
+  count: number;
+  total: number;
+  page: number;
+  limit: number;
+  has_more: boolean;
+}
+
+export async function getOrders(page: number = 1, limit: number = 20): Promise<PaginatedOrdersResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/orders?page=${page}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch orders");
   const data = await res.json();
-  return data.orders;
+  return {
+    orders: Array.isArray(data.orders) ? data.orders : [],
+    count: typeof data.count === "number" ? data.count : (data.orders?.length || 0),
+    total: typeof data.total === "number" ? data.total : (data.orders?.length || 0),
+    page: typeof data.page === "number" ? data.page : page,
+    limit: typeof data.limit === "number" ? data.limit : limit,
+    has_more: typeof data.has_more === "boolean" ? data.has_more : false,
+  };
 }
 
 export async function getOrderDetails(orderId: number) {
